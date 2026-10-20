@@ -1,0 +1,11 @@
+.DS_Store
+build/
+*.noindex/
+*.xcodeproj/
+xcuserdata/
+.build/
+*.noindex/
+.swiftpm/
+Packages/MountagentDeskKit/.build/
+*.noindex/
+*.dmg

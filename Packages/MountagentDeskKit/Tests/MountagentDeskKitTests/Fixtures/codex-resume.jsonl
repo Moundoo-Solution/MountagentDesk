@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"01a159a5-77b9-7d71-b220-7ea0f8db5bae"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`[features].codex_hooks` is deprecated. Use `[features].hooks` instead. (Enable it with `--enable hooks` or `[features].hooks` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.)"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"**Checking file contents**\n**Inspecting file ending**"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'tail -n 8 README.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc 'tail -n 8 README.md'","aggregated_output":"# demo\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"file_change","changes":[{"path":"/tmp/agentdesk-fixture/README.md","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"/tmp/agentdesk-fixture/README.md","kind":"update"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"edited"}}
+{"type":"turn.completed","usage":{"input_tokens":79500,"cached_input_tokens":54400,"cache_write_input_tokens":0,"output_tokens":300,"reasoning_output_tokens":147}}
