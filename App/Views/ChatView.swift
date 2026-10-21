@@ -327,6 +327,17 @@ private struct SessionPane: View {
         .environment(\.isActivePane, isActive)
         .environment(\.paneIndex, index)
         .overlay {
+            let session = sessionID.flatMap { model.sessions[$0] }
+            let running = session.map { model.isRunning($0.id) } ?? false
+            ZStack {
+                if running, let session {
+                    WorkingGlow(tint: session.agent.tint)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.4), value: running)
+        }
+        .overlay {
             if dropTargeted {
                 Rectangle().strokeBorder(Theme.accent, lineWidth: 2).background(Theme.accent.opacity(0.06)).allowsHitTesting(false)
             }
@@ -336,6 +347,36 @@ private struct SessionPane: View {
             model.open(id, inPane: index)
             return true
         } isTargeted: { dropTargeted = $0 }
+    }
+}
+
+/// A light that circles a pane's edge in the agent's color while it works. With Reduce
+/// Motion on, the light holds still.
+private struct WorkingGlow: View {
+    let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let lap: Double = 2.4
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.lap) / Self.lap
+            let light = AngularGradient(
+                stops: [
+                    .init(color: tint.opacity(0), location: 0),
+                    .init(color: tint.opacity(0), location: 0.55),
+                    .init(color: tint, location: 0.96),
+                    .init(color: tint.opacity(0), location: 1),
+                ],
+                center: .center,
+                angle: .degrees(phase * 360)
+            )
+            ZStack {
+                Rectangle().strokeBorder(tint.opacity(0.25), lineWidth: 1)
+                Rectangle().strokeBorder(light, lineWidth: 6).blur(radius: 6).opacity(0.7)
+                Rectangle().strokeBorder(light, lineWidth: 2)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
