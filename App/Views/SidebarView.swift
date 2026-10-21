@@ -243,7 +243,8 @@ private struct SessionCell: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title)
                     .font(Theme.Font.ui)
-                    .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
+                    .fontWeight(isActive ? .medium : .regular)
+                    .foregroundStyle(isSelected || isActive ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                     .mask(fadeMask)
                 if let branch = session.branch {
@@ -271,10 +272,7 @@ private struct SessionCell: View {
                     .help("Open in pane \(pane + 1)")
             }
             ZStack(alignment: .trailing) {
-                Text(session.updatedAt.shortAge)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(isSelected ? Theme.textSecondary : Theme.textTertiary)
-                    .monospacedDigit()
+                trailingStatus
                     .opacity(hovering ? 0 : 1)
                 HStack(spacing: 2) {
                     cellAction("pencil", help: "Rename", action: rename)
@@ -286,8 +284,8 @@ private struct SessionCell: View {
         .padding(EdgeInsets(top: 6, leading: 5, bottom: 6, trailing: 8))
         .background(background, in: RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous))
         .overlay(alignment: .leading) {
-            if isSelected {
-                Capsule().fill(tint).frame(width: 3, height: 16).offset(x: -1)
+            if isSelected || isActive {
+                Capsule().fill(activeTint ?? tint).frame(width: 3, height: 16).offset(x: -1)
             }
         }
         .contentShape(Rectangle())
@@ -307,8 +305,40 @@ private struct SessionCell: View {
         }
     }
 
+    /// Working or waiting on you: the row stands out even when it isn't selected.
+    private var isActive: Bool { isRunning || needsApproval }
+
+    /// Amber while it waits for an answer, the agent's color while it works.
+    private var activeTint: Color? {
+        needsApproval ? Theme.warning : isRunning ? session.agent.tint : nil
+    }
+
     private var background: Color {
-        isSelected ? tint.opacity(0.14) : hovering ? Theme.hover : .clear
+        if let activeTint { return activeTint.opacity(isSelected ? 0.20 : 0.12) }
+        return isSelected ? tint.opacity(0.14) : hovering ? Theme.hover : .clear
+    }
+
+    /// "Needs you" or a pulsing "Working" in place of the age while the agent is busy.
+    @ViewBuilder
+    private var trailingStatus: some View {
+        if needsApproval {
+            Text("Needs you")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Theme.warning)
+        } else if isRunning {
+            TimelineView(.animation) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                Text("Working")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(session.agent.tint)
+                    .opacity(0.55 + 0.45 * abs(cos(phase * .pi)))
+            }
+        } else {
+            Text(session.updatedAt.shortAge)
+                .font(Theme.Font.caption)
+                .foregroundStyle(isSelected ? Theme.textSecondary : Theme.textTertiary)
+                .monospacedDigit()
+        }
     }
 
     /// Long titles fade out at the trailing edge instead of ending in an ellipsis.
@@ -336,7 +366,8 @@ private struct SessionCell: View {
                 .foregroundStyle(Theme.warning)
                 .help("Waiting for your approval")
         } else if isRunning {
-            ProgressView().controlSize(.mini).scaleEffect(0.8)
+            WorkingSpinner(tint: session.agent.tint)
+                .help("\(session.agent.displayName) is working")
         } else {
             Image(systemName: session.agent.symbolName)
                 .font(.system(size: 11))
@@ -345,6 +376,27 @@ private struct SessionCell: View {
         }
     }
 
+}
+
+/// A ring turning in the agent's color, with the agent's mark inside: easier to spot than
+/// the system's small grey spinner.
+private struct WorkingSpinner: View {
+    let tint: Color
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9
+            ZStack {
+                Circle().stroke(tint.opacity(0.2), lineWidth: 1.8)
+                Circle()
+                    .trim(from: 0, to: 0.3)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    .rotationEffect(.degrees(turn * 360))
+                Circle().fill(tint).frame(width: 4, height: 4)
+            }
+            .frame(width: 13, height: 13)
+        }
+    }
 }
 
 /// Each enabled agent's account and plan usage at a glance, as in Claude Code's own panel.
