@@ -43,11 +43,19 @@
     <td valign="top"><h3>💵 Cost at API prices</h3><img src=".github/assets/cost.png" alt="What the agents' own logs add up to at API prices" /></td>
     <td valign="top"><h3>📊 Plan limits, live</h3><img src=".github/assets/usage.png" alt="Account and usage for each agent" /></td>
   </tr>
+  <tr>
+    <td valign="top"><h3>💬 Comment on the diff</h3><img src=".github/assets/review.png" alt="A comment on a diff line, ready to send to the agent" /></td>
+    <td valign="top"><h3>🔃 Pull request in one click</h3><img src=".github/assets/pull-request.png" alt="Create Pull Request, filled in from the session" /></td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top"><h3>⏰ Prompts on a schedule</h3><img src=".github/assets/schedules.png" alt="Scheduled tasks in Settings" /></td>
+  </tr>
 </table>
 
 <p align="center">
   ✋ Approve commands &nbsp;·&nbsp; ⏳ Queue messages &nbsp;·&nbsp; 🟢 What each agent is doing<br />
-  ✳️ Dirty-branch marker &nbsp;·&nbsp; 🗂️ Archive &amp; export &nbsp;·&nbsp; 💾 Backup &amp; restore &nbsp;·&nbsp; 🎙️ Dictation
+  ✳️ Dirty-branch marker &nbsp;·&nbsp; ⚙️ Worktree setup script &nbsp;·&nbsp; 🔔 Chime &amp; Dock badge<br />
+  🗂️ Archive &amp; export &nbsp;·&nbsp; 💾 Backup &amp; restore &nbsp;·&nbsp; 🎙️ Dictation
 </p>
 
 <a id="build"></a>
