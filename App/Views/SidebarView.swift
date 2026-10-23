@@ -202,6 +202,9 @@ private struct GroupTitle: View {
                     Divider()
                     Section("Last 30 days") {
                         Text(model.usageSummary(of: project) ?? "No turns yet")
+                        if let estimate = model.apiEquivalent(of: project) {
+                            Text("\(estimate), all Claude Code and Codex work here")
+                        }
                         Button("Export Usage as CSV…") { model.exportUsageCSV() }
                     }
                     Divider()

@@ -147,6 +147,9 @@ final class AppModel {
     private(set) var cursorUsageProblem: String?
     private var usageTimer: Timer?
     private(set) var ledger = UsageLedger()
+    /// Claude Code's and Codex's own logs on this Mac at API prices, in the app or not.
+    private(set) var localUsage: [LocalUsage.Entry] = []
+    private var scanningLocalUsage = false
     /// The install / sign-in / update command shown in the setup terminal.
     var setupTask: SetupTask?
     /// Git identities + SSH keys the user switches between per project.
@@ -305,6 +308,14 @@ final class AppModel {
         let tokens = total.totalTokens >= 1000 ? "\(total.totalTokens / 1000)k" : String(total.totalTokens)
         return [total.hasCost ? String(format: "$%.2f", total.costUSD) : nil, "\(tokens) tokens", "\(total.turns) turn\(total.turns == 1 ? "" : "s")"]
             .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// "≈ $41.20 at API prices" for the last 30 days of Claude Code and Codex in the
+    /// project's folder (and its worktrees), from their own logs; nil when there's none.
+    func apiEquivalent(of project: Project) -> String? {
+        let total = LocalUsage.total(of: localUsage, folder: project.path, lastDays: 30)
+        guard total.costUSD > 0 else { return nil }
+        return "≈ \(total.costUSD.formatted(.currency(code: "USD").precision(.fractionLength(2)))) at API prices"
     }
 
     /// Every project's daily usage as CSV, for billing clients.
@@ -867,6 +878,7 @@ final class AppModel {
             }
             if agent == .cursor { refreshCursorUsage() }
             if agent == .codex { refreshCodexUsage() }
+            if agent == .claude || agent == .codex { refreshLocalUsage() }
             refreshDirty()
             if agent == .copilot { refreshCopilotUsage() }
             // Agents may switch branches during a turn; remember where this session ended up.
@@ -1500,6 +1512,25 @@ final class AppModel {
         }
         refreshCodexUsage()
         refreshCopilotUsage()
+        refreshLocalUsage()
+    }
+
+    /// Re-reads the logs that changed since the last scan, off the main thread. Prices the
+    /// user adds or corrects go in `model-prices.json` in the data folder.
+    func refreshLocalUsage() {
+        guard !scanningLocalUsage else { return }
+        scanningLocalUsage = true
+        let prices = ModelPrices.builtIn.merging(store.load([String: ModelPrices.Price].self, named: "model-prices") ?? [:])
+        let saved = store.load(LocalUsage.Cache.self, named: "local-usage-cache") ?? LocalUsage.Cache()
+        Task.detached(priority: .utility) {
+            var cache = saved
+            let entries = LocalUsage.scan(prices: prices, cache: &cache)
+            await MainActor.run {
+                self.localUsage = entries
+                self.scanningLocalUsage = false
+                try? self.store.save(cache, named: "local-usage-cache")
+            }
+        }
     }
 
     func refreshCodexUsage() {

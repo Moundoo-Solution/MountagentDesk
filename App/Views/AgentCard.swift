@@ -10,6 +10,7 @@ struct AgentCard: View {
     /// Setup terminals open over the Settings window, where the card lives.
     private let host = AppModel.SetupTask.Host.settings
     @State private var showsInsights = false
+    @State private var showsModels = false
 
     private var account: AgentAccount? { model.account(kind) }
     private var enabled: Bool { model.isEnabled(kind) }
@@ -35,6 +36,12 @@ struct AgentCard: View {
                 footer
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
+                if kind == .claude || kind == .codex, LocalUsage.total(of: model.localUsage, agent: kind, lastDays: nil).tokens > 0 {
+                    divider
+                    apiEstimate
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
                 if showsInsights, kind == .claude, let notes = model.planUsage?.notes, !notes.isEmpty {
                     insights(notes)
                         .padding(.horizontal, 14)
@@ -298,6 +305,78 @@ struct AgentCard: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// "At API prices  Today $4.10 · 7 days $38 · 30 days $120 · All $310", from the CLI's own
+    /// logs: every turn on this Mac, in the app or a terminal.
+    private var apiEstimate: some View {
+        HStack(spacing: 10) {
+            Text("At API prices")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .help("What \(kind.displayName)'s work on this Mac would cost billed per token, read from its own logs. An estimate, not your plan's bill.")
+            HStack(spacing: 6) {
+                estimate("Today", lastDays: 1)
+                dot
+                estimate("7 days", lastDays: 7)
+                dot
+                estimate("30 days", lastDays: 30)
+                dot
+                estimate("All", lastDays: nil)
+            }
+            Spacer(minLength: 8)
+            Button {
+                showsModels.toggle()
+            } label: {
+                Text("By model")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .hoverHighlight(cornerRadius: Theme.Radius.chip)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showsModels, arrowEdge: .bottom) { modelBreakdown }
+        }
+    }
+
+    private func estimate(_ title: String, lastDays: Int?) -> some View {
+        let total = LocalUsage.total(of: model.localUsage, agent: kind, lastDays: lastDays)
+        let tokens = total.tokens.formatted(.number.notation(.compactName))
+        return HStack(spacing: 4) {
+            Text(title).foregroundStyle(Theme.textSecondary)
+            Text(total.costUSD.formatted(.currency(code: "USD").precision(.fractionLength(total.costUSD < 100 ? 2 : 0))))
+                .fontWeight(.semibold).foregroundStyle(Theme.textPrimary).monospacedDigit()
+        }
+        .font(Theme.Font.caption)
+        .help(total.unpricedTokens > 0 ? "\(tokens) tokens, \(total.unpricedTokens.formatted(.number.notation(.compactName))) of them on models without a price" : "\(tokens) tokens")
+    }
+
+    /// The last 30 days per model; models without a price show tokens only.
+    private var modelBreakdown: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Last 30 days at API prices").font(.system(size: 11.5, weight: .semibold))
+            let rows = LocalUsage.byModel(model.localUsage, agent: kind, lastDays: 30)
+            if rows.isEmpty {
+                Text("Nothing in the last 30 days").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
+            ForEach(rows, id: \.model) { row in
+                HStack {
+                    Text(row.model).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                    Spacer(minLength: 16)
+                    Text(row.total.tokens.formatted(.number.notation(.compactName)) + " tok")
+                        .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).monospacedDigit()
+                    Text(row.total.unpricedTokens == row.total.tokens ? "—" : row.total.costUSD.formatted(.currency(code: "USD").precision(.fractionLength(2))))
+                        .font(Theme.Font.caption.weight(.semibold)).monospacedDigit()
+                        .frame(minWidth: 60, alignment: .trailing)
+                }
+            }
+            Text("Add or correct prices in model-prices.json in the data folder.")
+                .font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
+                .padding(.top, 4)
+        }
+        .padding(12)
+        .frame(width: 320)
     }
 
     private var dot: some View {
