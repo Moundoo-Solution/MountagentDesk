@@ -1,0 +1,44 @@
+import Foundation
+import Testing
+@testable import MountagentDeskKit
+
+@Suite struct AgentLimitsTests {
+    private let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+    @Test func readsCodexLimitsFromItsSessionLog() throws {
+        let line = #"{"timestamp":"2026-09-21T10:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":42.4,"window_minutes":300,"resets_at":1790003600},"secondary":{"used_percent":7.0,"window_minutes":10080,"resets_at":1789000000},"plan_type":"plus"}}}"#
+        let usage = try #require(CodexLimits.parse(line, now: now))
+        #expect(usage.limits.map(\.name) == ["5-hour limit", "Weekly limit"])
+        #expect(usage.limits.map(\.percent) == [42, 0], "a window that has reset starts from nothing")
+        #expect(usage.limits[0].resetsAt == Date(timeIntervalSince1970: 1_790_003_600))
+        #expect(usage.notes == ["Plus"])
+        #expect(CodexLimits.parse(#"{"payload":{"rate_limits":{"primary":null}}}"#, now: now) == nil)
+
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("codex-\(UUID().uuidString)")
+        let folder = home.appendingPathComponent("sessions/2026/09/21")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ("{\"type\":\"session_meta\"}\n" + line + "\n{\"type\":\"other\"}\n").write(to: folder.appendingPathComponent("rollout-a.jsonl"), atomically: true, encoding: .utf8)
+        #expect(CodexLimits.latest(home: home, now: now)?.limits.first?.percent == 42)
+    }
+
+    @Test func readsTheCodexAccountFromTheIdentityToken() throws {
+        let claims = #"{"email":"alex@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"pro"}}"#
+        let payload = Data(claims.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+        let account = CodexLimits.claims(ofJWT: "eyJhbGciOiJub25lIn0.\(payload).sig")
+        #expect(account.email == "alex@example.com" && account.plan == "Pro")
+        #expect(CodexLimits.claims(ofJWT: "nonsense").email == nil)
+    }
+
+    @Test func readsCopilotQuotas() throws {
+        let json = #"{"copilot_plan":"individual","access_type_sku":"free_limited_copilot","quota_reset_date":"2026-11-01","quota_snapshots":{"chat":{"entitlement":50,"percent_remaining":98.8,"unlimited":false},"completions":{"unlimited":true},"premium_interactions":{"entitlement":0,"percent_remaining":0,"unlimited":false}}}"#
+        let result = try #require(CopilotLimits.parse(Data(json.utf8), now: now))
+        #expect(result.plan == "Free")
+        #expect(result.usage.limits.map(\.name) == ["Chat"] && result.usage.limits[0].percent == 1)
+        #expect(result.usage.notes == ["No premium requests in this plan"])
+        #expect(result.usage.limits[0].resetsAt != nil)
+        let pro = #"{"copilot_plan":"individual","quota_reset_date":"2026-11-01","quota_snapshots":{"chat":{"unlimited":true},"premium_interactions":{"entitlement":300,"percent_remaining":60,"unlimited":false}}}"#
+        let paid = try #require(CopilotLimits.parse(Data(pro.utf8), now: now))
+        #expect(paid.plan == "Pro" && paid.usage.limits.map(\.percent) == [40])
+    }
+}

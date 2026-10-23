@@ -493,6 +493,20 @@ private struct AccountUsageSection: View {
                 }
             case .cursor:
                 CursorUsageMeters()
+            case .codex where model.codexUsage != nil:
+                if let usage = model.codexUsage {
+                    ForEach(usage.limits, id: \.name) { UsageMeter(limit: $0) }
+                    Text("As of the last Codex turn, \(usage.fetchedAt.formatted(.relative(presentation: .named)))")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+            case .copilot where model.copilotUsage != nil:
+                if let usage = model.copilotUsage?.usage {
+                    ForEach(usage.limits, id: \.name) { UsageMeter(limit: $0) }
+                    ForEach(usage.notes, id: \.self) { note in
+                        Text(note).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                    }
+                }
             case .codex, .antigravity, .copilot:
                 // Their CLIs don't report plan limits; show what went through Mountagent Desk today.
                 let today = model.ledger.total(for: kind, lastDays: 1)
@@ -517,7 +531,7 @@ private struct AccountUsageSection: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 6)
-            Text([account?.email, account?.plan].compactMap { $0 }.joined(separator: " · "))
+            Text([account?.email, kind == .copilot ? model.copilotUsage?.plan ?? account?.plan : account?.plan].compactMap { $0 }.joined(separator: " · "))
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.textTertiary)
                 .lineLimit(1)

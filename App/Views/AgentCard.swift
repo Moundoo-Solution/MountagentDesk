@@ -188,6 +188,15 @@ struct AgentCard: View {
             }
         case .cursor:
             cursorLimits
+        case .codex where model.codexUsage != nil:
+            if let usage = model.codexUsage { UsageRings(limits: usage.limits, updated: usage.fetchedAt) }
+        case .copilot where model.copilotUsage != nil:
+            if let usage = model.copilotUsage?.usage {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !usage.limits.isEmpty { UsageRings(limits: usage.limits, updated: usage.fetchedAt) }
+                    ForEach(usage.notes, id: \.self) { Text($0).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+                }
+            }
         case .codex, .antigravity, .copilot:
             HStack(spacing: 10) {
                 Image(systemName: "chart.bar.xaxis").foregroundStyle(Theme.textTertiary)

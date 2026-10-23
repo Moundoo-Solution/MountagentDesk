@@ -60,6 +60,12 @@ public struct AccountProbe: Sendable {
             if let status = try? runner.capture(.codex, arguments: ["login", "status"], timeout: 20) {
                 Self.applyCodexStatus(status, to: &account)
             }
+            // `login status` names no account; the login's identity part does.
+            if account.authMethod == "ChatGPT" {
+                let signedIn = CodexLimits.account()
+                account.email = signedIn.email
+                if let plan = signedIn.plan { account.plan = plan }
+            }
         case .antigravity:
             if let version = try? runner.capture(.antigravity, arguments: ["--version"], timeout: 20) {
                 account.version = version.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").last.map(String.init)

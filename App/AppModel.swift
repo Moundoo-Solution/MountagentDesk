@@ -96,6 +96,9 @@ final class AppModel {
     private(set) var checkingAccounts = false
     /// Claude's plan limits from `/usage`, refreshed in the background.
     private(set) var planUsage: PlanUsage?
+    /// Codex's limits as its last turn saw them, and Copilot's monthly quotas.
+    private(set) var codexUsage: PlanUsage?
+    private(set) var copilotUsage: CopilotLimits.Result?
     private(set) var cursorUsage: CursorUsage?
     private(set) var cursorUsageProblem: String?
     private var usageTimer: Timer?
@@ -796,6 +799,8 @@ final class AppModel {
                 try? store.save(ledger, named: "usage")
             }
             if agent == .cursor { refreshCursorUsage() }
+            if agent == .codex { refreshCodexUsage() }
+            if agent == .copilot { refreshCopilotUsage() }
             // Agents may switch branches during a turn; remember where this session ended up.
             // A worktree session stays on its own branch; the main folder's may have moved.
             let worktreeBranch = sessions[sessionID]?.worktreeBranch
@@ -1424,6 +1429,23 @@ final class AppModel {
         Task.detached(priority: .utility) {
             guard let usage = probe.claudePlanUsage() else { return }
             await MainActor.run { self.setPlanUsage(usage) }
+        }
+        refreshCodexUsage()
+        refreshCopilotUsage()
+    }
+
+    func refreshCodexUsage() {
+        guard enabledAgents.contains(.codex) else { return }
+        Task.detached(priority: .utility) {
+            let usage = CodexLimits.latest()
+            await MainActor.run { self.codexUsage = usage }
+        }
+    }
+
+    func refreshCopilotUsage() {
+        guard enabledAgents.contains(.copilot), let token = copilotToken() else { return }
+        Task {
+            if let result = await CopilotLimits.fetch(token: token) { copilotUsage = result }
         }
     }
 
