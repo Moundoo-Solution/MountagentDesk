@@ -422,6 +422,7 @@ private struct SessionChat: View {
 /// A terminal session: its command running in the session's folder, with a strip saying
 /// what runs where and whether it has ended.
 private struct TerminalSessionView: View {
+    @Environment(AppModel.self) private var model
     let session: ChatSession
     let command: String
     let directory: String
@@ -433,9 +434,9 @@ private struct TerminalSessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: "terminal")
+                Image(symbol: session.symbolName)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(session.tint)
                 Text(command.isEmpty ? "Shell" : command)
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
@@ -462,7 +463,11 @@ private struct TerminalSessionView: View {
             .padding(.trailing, 6)
             .frame(height: 30)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
-            SessionTerminalHost(sessionID: session.id, command: command, directory: directory, dark: colorScheme == .dark, theme: theme)
+            SessionTerminalHost(sessionID: session.id, command: TerminalCommands.line(for: command, hasRun: session.commandHasRun),
+                                directory: directory, dark: colorScheme == .dark, theme: theme) { [model, id = session.id] in
+                // After the view update: a terminal agent picks its conversation up from here on.
+                DispatchQueue.main.async { model.markCommandRun(id) }
+            }
                 .id(generation)
                 .padding(.leading, 8)
                 .padding(.vertical, 4)
@@ -491,7 +496,7 @@ private struct PaneHeader: View {
                 .help("⌃\(index + 1)")
             Image(symbol: session.symbolName)
                 .font(.system(size: 10.5))
-                .foregroundStyle(session.isTerminal ? Theme.textSecondary : session.agent.tint)
+                .foregroundStyle(session.tint)
             Text(session.title)
                 .font(.system(size: 12, weight: isActive ? .semibold : .medium))
                 .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
@@ -565,7 +570,7 @@ private struct EmptyPane: View {
                             HStack(spacing: 8) {
                                 Image(symbol: session.symbolName)
                                     .font(.system(size: 10.5))
-                                    .foregroundStyle(session.isTerminal ? Theme.textSecondary : session.agent.tint)
+                                    .foregroundStyle(session.tint)
                                     .frame(width: 14)
                                 Text(session.title)
                                     .font(Theme.Font.ui)

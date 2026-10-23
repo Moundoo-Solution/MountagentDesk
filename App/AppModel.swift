@@ -610,6 +610,12 @@ final class AppModel {
         return session
     }
 
+    func markCommandRun(_ sessionID: UUID) {
+        guard sessions[sessionID]?.commandHasRun == false else { return }
+        update(sessionID) { $0.commandHasRun = true }
+        persist(sessionID)
+    }
+
     func rename(_ sessionID: UUID, to title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }

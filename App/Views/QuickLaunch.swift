@@ -7,8 +7,7 @@ struct QuickLaunch: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var projectID: UUID?
-    /// Nil: a terminal session.
-    @State private var agent: AgentKind? = .claude
+    @State private var choice = Choice.agent(.claude)
     @State private var command = ""
     @State private var installed: [String] = []
     @State private var branch = ""
@@ -17,6 +16,17 @@ struct QuickLaunch: View {
     @FocusState private var focused: Field?
 
     private enum Field { case branch, message, command }
+
+    /// An agent, a terminal agent (Kiro, in its own interface), or any command.
+    private enum Choice: Hashable {
+        case agent(AgentKind)
+        case terminalAgent(String)
+        case terminal
+    }
+
+    private var agent: AgentKind? {
+        if case .agent(let kind) = choice { kind } else { nil }
+    }
 
     private var project: Project? { model.project(projectID) }
 
@@ -29,14 +39,17 @@ struct QuickLaunch: View {
                         Text(project.name).tag(UUID?.some(project.id))
                     }
                 }
-                Picker("Agent", selection: $agent) {
+                Picker("Agent", selection: $choice) {
                     ForEach(model.agentChoices) { kind in
-                        Label(kind.displayName, systemImage: kind.symbolName).tag(AgentKind?.some(kind))
+                        Label(kind.displayName, systemImage: kind.symbolName).tag(Choice.agent(kind))
                     }
                     Divider()
-                    Label("Terminal", systemImage: "terminal").tag(AgentKind?.none)
+                    ForEach(TerminalCommands.agents) { terminalAgent in
+                        Label(terminalAgent.name, systemImage: terminalAgent.symbolName).tag(Choice.terminalAgent(terminalAgent.name))
+                    }
+                    Label("Terminal", systemImage: "terminal").tag(Choice.terminal)
                 }
-                if agent == nil {
+                if choice == .terminal {
                     HStack(spacing: 6) {
                         TextField("Command", text: $command, prompt: Text("Empty: your shell"))
                             .font(.system(.body, design: .monospaced))
@@ -91,7 +104,7 @@ struct QuickLaunch: View {
                 Button("Launch") {
                     guard let project else { return }
                     model.quickLaunch(in: project, agent: agent ?? project.defaultAgent, branch: branch, message: message,
-                                      command: agent == nil ? command : nil)
+                                      command: launchedCommand)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -104,11 +117,14 @@ struct QuickLaunch: View {
             let current = model.selectedSession
             projectID = current?.projectID ?? model.projects.first?.id
             if model.quickLaunchesTerminal {
-                agent = nil
+                choice = .terminal
                 model.quickLaunchesTerminal = false
                 focused = .command
+            } else if let command = current?.command {
+                choice = TerminalCommands.agent(for: command).map { .terminalAgent($0.name) } ?? .terminal
+                focused = .branch
             } else {
-                agent = current?.agent ?? project?.defaultAgent ?? model.agentChoices.first ?? .claude
+                choice = .agent(current?.agent ?? project?.defaultAgent ?? model.agentChoices.first ?? .claude)
                 focused = .branch
             }
             #if DEBUG
@@ -124,9 +140,24 @@ struct QuickLaunch: View {
         }
     }
 
+    /// The terminal session's command; nil for an agent.
+    private var launchedCommand: String? {
+        switch choice {
+        case .agent: nil
+        case .terminalAgent(let name): TerminalCommands.agents.first { $0.name == name }?.command
+        case .terminal: command
+        }
+    }
+
     private var footer: String {
         let name = branch.trimmingCharacters(in: .whitespaces)
-        let what = agent == nil ? "Runs \(command.trimmingCharacters(in: .whitespaces).isEmpty ? "your shell" : "the command")" : "Works"
+        let what = switch choice {
+        case .agent: "Works"
+        case .terminalAgent(let name):
+            "Runs \(name) in its own terminal interface"
+                + (TerminalCommands.agents.first { $0.name == name && ExecutableLocator.find($0.executable) == nil } != nil ? ", after its installer," : "")
+        case .terminal: "Runs \(command.trimmingCharacters(in: .whitespaces).isEmpty ? "your shell" : "the command")"
+        }
         guard !name.isEmpty else { return "\(what) in \(project?.name ?? "the project")'s main folder." }
         let exists = branches.contains(name)
         return "Makes a worktree next to the repository, \(exists ? "on the existing branch" : "on a new branch from HEAD named") \(name), and \(agent == nil ? "runs there" : "works there")."

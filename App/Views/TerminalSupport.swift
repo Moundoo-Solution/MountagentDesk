@@ -379,8 +379,10 @@ final class SessionTerminals {
     @ObservationIgnored private var views: [UUID: LocalProcessTerminalView] = [:]
     @ObservationIgnored private var watchers: [UUID: ServerTerminals.Watcher] = [:]
 
-    func view(for sessionID: UUID, command: String, directory: String) -> LocalProcessTerminalView {
+    /// The session's terminal; `started` runs when its program is started anew.
+    func view(for sessionID: UUID, command: String, directory: String, started: () -> Void = {}) -> LocalProcessTerminalView {
         if let view = views[sessionID] { return view }
+        defer { started() }
         let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let watcher = ServerTerminals.Watcher { [weak self, weak view] code in
@@ -423,9 +425,10 @@ struct SessionTerminalHost: NSViewRepresentable {
     let directory: String
     let dark: Bool
     let theme: TerminalTheme
+    var started: () -> Void = {}
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
-        let view = SessionTerminals.shared.view(for: sessionID, command: command, directory: directory)
+        let view = SessionTerminals.shared.view(for: sessionID, command: command, directory: directory, started: started)
         TerminalShell.style(view, dark: dark, theme: theme)
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         return view

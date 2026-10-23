@@ -522,6 +522,30 @@ extension Date {
 }
 
 extension ChatSession {
-    /// The agent's mark, or a terminal for a terminal session.
-    var symbolName: String { isTerminal ? "terminal" : agent.symbolName }
+    /// The agent's mark, or a terminal agent's, or a terminal for a terminal session.
+    var symbolName: String {
+        guard let command else { return agent.symbolName }
+        return TerminalCommands.agent(for: command)?.symbolName ?? "terminal"
+    }
+
+    var tint: Color {
+        guard let command else { return agent.tint }
+        return TerminalCommands.agent(for: command)?.tint ?? Theme.textSecondary
+    }
+}
+
+extension TerminalAgent {
+    var symbolName: String {
+        switch name {
+        case "Kiro": "k.circle.fill"
+        default: "terminal"
+        }
+    }
+
+    var tint: Color {
+        switch name {
+        case "Kiro": Color(light: 0x7A3EE6, dark: 0xA87BFF)
+        default: Theme.textSecondary
+        }
+    }
 }

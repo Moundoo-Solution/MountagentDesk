@@ -29,6 +29,8 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     /// Set for a terminal session: the command it runs in its folder instead of an agent
     /// (empty: the login shell).
     public var command: String?
+    /// The command has been started once; terminal agents resume from then on.
+    public var commandHasRun = false
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -85,6 +87,7 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
         worktree = try container.decodeIfPresent(String.self, forKey: .worktree)
         worktreeBranch = try container.decodeIfPresent(String.self, forKey: .worktreeBranch)
         command = try container.decodeIfPresent(String.self, forKey: .command)
+        commandHasRun = try container.decodeIfPresent(Bool.self, forKey: .commandHasRun) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }

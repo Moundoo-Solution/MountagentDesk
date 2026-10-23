@@ -224,6 +224,15 @@ private struct GroupTitle: View {
                         }
                     }
                     Divider()
+                    ForEach(TerminalCommands.agents) { agent in
+                        Button {
+                            model.quickLaunch(in: project, agent: project.defaultAgent, branch: "", message: "", command: agent.command)
+                        } label: {
+                            Label {
+                                Text(ExecutableLocator.find(agent.executable) == nil ? "Install \(agent.name) and Start a Session" : "New \(agent.name) Session")
+                            } icon: { Image(systemName: agent.symbolName) }
+                        }
+                    }
                     Button {
                         model.quickLaunch(in: project, agent: project.defaultAgent, branch: "", message: "", command: "")
                     } label: {
@@ -439,10 +448,10 @@ private struct SessionCell: View {
             WorkingSpinner(tint: session.agent.tint)
                 .help("\(session.agent.displayName) is working")
         } else if session.isTerminal {
-            Image(systemName: "terminal")
+            Image(symbol: session.symbolName)
                 .font(.system(size: 10.5))
-                .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
-                .help("Terminal session")
+                .foregroundStyle(isSelected ? session.tint : session.tint.opacity(0.75))
+                .help(session.title == "Shell" ? "Terminal session" : "\(session.title) in a terminal")
         } else {
             Image(symbol: session.agent.symbolName)
                 .font(.system(size: 11))

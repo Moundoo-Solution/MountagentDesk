@@ -66,15 +66,28 @@ import Testing
         #expect(TerminalCommands.title(for: "aider --model sonnet") == "aider")
         #expect(TerminalCommands.title(for: "DEBUG=1 /opt/homebrew/bin/htop") == "htop")
         #expect(TerminalCommands.title(for: "  ") == "Shell")
+        #expect(TerminalCommands.title(for: "kiro-cli chat") == "Kiro")
         #expect(TerminalCommands.installed { $0 == "aider" || $0 == "claude" ? URL(fileURLWithPath: "/bin/\($0)") : nil } == ["claude", "aider"])
+    }
+
+    @Test func runsKiroThroughItsOwnInterface() {
+        let installed: (String) -> URL? = { URL(fileURLWithPath: "/bin/\($0)") }
+        #expect(TerminalCommands.line(for: "kiro-cli chat", hasRun: false, find: installed) == "kiro-cli chat")
+        #expect(TerminalCommands.line(for: "kiro-cli chat", hasRun: true, find: installed) == "kiro-cli chat --resume")
+        #expect(TerminalCommands.line(for: "kiro-cli chat", hasRun: false) { _ in nil } == "curl -fsSL https://cli.kiro.dev/install | bash && kiro-cli chat")
+        #expect(TerminalCommands.line(for: "kiro-cli chat --agent mine", hasRun: true, find: installed) == "kiro-cli chat --agent mine", "the user's own line runs as typed")
+        var session = ChatSession(projectID: UUID(), agent: .claude)
+        session.command = "kiro-cli chat"
+        #expect(SessionActivity.line(for: session, running: false)?.text == "Kiro in the terminal")
     }
 
     @Test func savesTheCommandAndShowsIt() throws {
         var session = ChatSession(projectID: UUID(), agent: .claude)
         #expect(!session.isTerminal)
         session.command = "aider --yes"
+        session.commandHasRun = true
         let decoded = try JSONDecoder().decode(ChatSession.self, from: JSONEncoder().encode(session))
-        #expect(decoded.command == "aider --yes")
+        #expect(decoded.command == "aider --yes" && decoded.commandHasRun)
         #expect(SessionActivity.line(for: decoded, running: false)?.text == "$ aider --yes")
         session.command = ""
         #expect(SessionActivity.line(for: session, running: false)?.text == "Shell")

@@ -14,6 +14,7 @@ public enum SessionActivity {
 
     public static func line(for session: ChatSession, running: Bool) -> Line? {
         if let command = session.command {
+            if let agent = TerminalCommands.agent(for: command) { return Line(state: .finished, text: "\(agent.name) in the terminal") }
             return Line(state: .finished, text: command.isEmpty ? "Shell" : "$ \(oneLine(command))")
         }
         let items = session.items
