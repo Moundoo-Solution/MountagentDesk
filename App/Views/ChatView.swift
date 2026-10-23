@@ -557,12 +557,14 @@ struct BranchChip: View {
     var body: some View {
         // A worktree session has a branch of its own, whatever the main folder is on.
         let current = session.worktreeBranch ?? model.branch(of: project)
+        let dirty = model.isDirty(model.workRoot(of: session, project: project))
         let moved = session.worktreeBranch == nil && session.branch != nil && current != nil && session.branch != current
         if current != nil || session.branch != nil {
             HStack(spacing: 5) {
                 Image(systemName: moved ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
                     .font(.system(size: 10, weight: .semibold))
-                Text(current ?? session.branch ?? "")
+                // `main*`: uncommitted changes, as a shell prompt shows them.
+                Text((current ?? session.branch ?? "") + (dirty ? "*" : ""))
                     .font(.system(size: 11.5, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -574,7 +576,7 @@ struct BranchChip: View {
             .padding(.horizontal, 7)
             .frame(height: 20)
             .background((moved ? Theme.warning : project.tint).opacity(0.13), in: Capsule())
-            .help(tooltip(current: current, moved: moved))
+            .help(tooltip(current: current, moved: moved) + (dirty ? "\nUncommitted changes" : ""))
         }
     }
 

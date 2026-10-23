@@ -18,8 +18,16 @@ final class AppModel {
     /// and menu commands act on. Setting it opens that session in the focused pane.
     var selectedSessionID: UUID? {
         get { grid.focusedSession }
-        set { grid.open(newValue) }
+        set {
+            grid.open(newValue)
+            refreshDirty()
+        }
     }
+    /// Working folders with uncommitted changes (the `*` after the branch). Only the selected
+    /// session's folder is looked at, and only while the app is in use: git status on a big
+    /// checkout isn't free.
+    private(set) var dirtyFolders: Set<String> = []
+    @ObservationIgnored private var dirtyTimer: Timer?
     /// Project whose rules and skills sheet is open.
     var contextProject: Project?
     /// Project whose folders sheet is open.
@@ -201,6 +209,29 @@ final class AppModel {
             MainActor.assumeIsolated {
                 self?.refreshPlanUsage()
                 self?.refreshCursorUsage()
+            }
+        }
+        dirtyTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { if NSApp.isActive { self?.refreshDirty() } }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshDirty() }
+        }
+    }
+
+    func isDirty(_ folder: URL) -> Bool {
+        dirtyFolders.contains(folder.path)
+    }
+
+    /// Looks again whether the selected session's folder has uncommitted changes.
+    func refreshDirty() {
+        guard let session = selectedSession, let project = project(session.projectID) else { return }
+        let folder = workRoot(of: session, project: project)
+        Task.detached(priority: .utility) {
+            let dirty = GitClient(root: folder).status()?.files.isEmpty == false
+            await MainActor.run {
+                guard self.dirtyFolders.contains(folder.path) != dirty else { return }
+                if dirty { self.dirtyFolders.insert(folder.path) } else { self.dirtyFolders.remove(folder.path) }
             }
         }
     }
@@ -800,6 +831,7 @@ final class AppModel {
             }
             if agent == .cursor { refreshCursorUsage() }
             if agent == .codex { refreshCodexUsage() }
+            refreshDirty()
             if agent == .copilot { refreshCopilotUsage() }
             // Agents may switch branches during a turn; remember where this session ended up.
             // A worktree session stays on its own branch; the main folder's may have moved.
