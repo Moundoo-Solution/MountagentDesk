@@ -94,7 +94,7 @@ final class AppModel {
                     $0.branch = created.branch
                 }
                 persist(session.id)
-                begin(session)
+                setUpWorktree(of: session.id, in: project) { begin(session) }
             } catch {
                 alert = "Couldn't make a worktree on \(name): \(error.localizedDescription)"
             }
@@ -374,7 +374,43 @@ final class AppModel {
 
     /// Working, or about to (taking the turn's checkpoint first).
     func isRunning(_ sessionID: UUID) -> Bool {
-        running[sessionID] != nil || preparing.contains(sessionID)
+        running[sessionID] != nil || preparing.contains(sessionID) || settingUpWorktree.contains(sessionID)
+    }
+
+    /// Sessions whose new worktree is still running the project's setup script; messages
+    /// sent meanwhile wait for it.
+    private(set) var settingUpWorktree: Set<UUID> = []
+
+    /// Runs the project's worktree setup script in the session's new worktree, notes how it
+    /// went in the transcript, then calls `then` (and sends what was queued meanwhile).
+    func setUpWorktree(of sessionID: UUID, in project: Project, then: @escaping () -> Void = {}) {
+        let script = project.worktreeSetup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !script.isEmpty, let path = sessions[sessionID]?.worktree else { return then() }
+        let worktree = URL(fileURLWithPath: path, isDirectory: true), main = project.url
+        settingUpWorktree.insert(sessionID)
+        let notice = ChatItem(kind: .notice, text: "Running the worktree setup script…")
+        update(sessionID) { $0.items.append(notice) }
+        Task {
+            let result = await Task.detached { WorktreeSetup.run(script, in: worktree, mainFolder: main) }.value
+            settingUpWorktree.remove(sessionID)
+            update(sessionID) { session in
+                guard let index = session.items.firstIndex(where: { $0.id == notice.id }) else { return }
+                let took = result.seconds < 1 ? "under a second" : "\(Int(result.seconds.rounded())) s"
+                if result.succeeded {
+                    session.items[index].text = "Ran the worktree setup script (\(took))."
+                } else {
+                    let why = result.timedOut ? "stopped after 10 minutes" : "exited with code \(result.status)"
+                    let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").suffix(12).joined(separator: "\n")
+                    session.items[index].text = "The worktree setup script \(why)." + (tail.isEmpty ? "" : "\n\n```\n\(tail)\n```")
+                    session.items[index].isError = true
+                }
+            }
+            persist(sessionID)
+            then()
+            if !isRunning(sessionID), let next = queued.removeValue(forKey: sessionID) {
+                send(next.text, attachments: next.attachments, images: next.images, in: sessionID)
+            }
+        }
     }
 
     /// True while an agent runs in a project that includes this folder.
@@ -958,6 +994,7 @@ final class AppModel {
                 }
                 session = sessions[session.id] ?? session
                 persist(session.id)
+                setUpWorktree(of: session.id, in: project)
             } catch {
                 alert = "Couldn't make a worktree: \(error.localizedDescription)"
             }

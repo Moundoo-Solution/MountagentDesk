@@ -94,6 +94,27 @@ struct FoldersView: View {
                 }
 
                 Section {
+                    TextEditor(text: $draft.worktreeSetup)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(minHeight: 64, maxHeight: 120)
+                        .overlay(alignment: .topLeading) {
+                            if draft.worktreeSetup.isEmpty {
+                                Text(#"cp "$MOUNTAGENT_MAIN_FOLDER/.env" . && npm install"#)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                } header: {
+                    Text("New worktrees")
+                } footer: {
+                    Text("Runs with your login shell in each worktree a session gets, before its agent starts: copy what git ignores (.env, keys), install dependencies. $MOUNTAGENT_MAIN_FOLDER is the main folder, $MOUNTAGENT_WORKTREE the new one. Messages sent meanwhile wait for it; how it went shows in the chat.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
                     Toggle("Also load rules from the other folders", isOn: $draft.loadsAdditionalRules)
                         .disabled(draft.additionalPaths.isEmpty)
                 } footer: {
