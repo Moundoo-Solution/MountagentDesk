@@ -309,7 +309,23 @@ private struct GeneralPane: View {
     @AppStorage(AppSettings.defaultAccessKey) private var defaultAccess = AccessLevel.editFiles
     @AppStorage(AppSettings.notifyKey) private var notify = true
     @AppStorage(AppSettings.chimeKey) private var chime = true
+    @AppStorage(AppSettings.notifyInFrontKey) private var notifyInFront = true
+    @AppStorage(AppSettings.chimeSoundKey) private var chimeSound = "Glass"
+    @AppStorage(AppSettings.failureSoundKey) private var failureSound = "Basso"
     @AppStorage(AppSettings.badgeUnreadKey) private var badgeUnread = true
+
+    /// A sound menu that plays each sound as it's picked.
+    private func soundPicker(_ title: String, _ selection: Binding<String>) -> some View {
+        Picker(title, selection: Binding(get: { selection.wrappedValue }, set: { name in
+            selection.wrappedValue = name
+            Notifier.play(name)
+        })) {
+            ForEach(AppSettings.sounds, id: \.self) { Text($0).tag($0) }
+        }
+        .fixedSize()
+        .disabled(!chime)
+        .help("\(title): \(selection.wrappedValue)")
+    }
 
     var body: some View {
         SettingsSection(title: "New work") {
@@ -333,11 +349,19 @@ private struct GeneralPane: View {
         }
 
         SettingsSection(title: "Notifications") {
-            SettingsRow(title: "Agent finished", detail: "Notify when an agent finishes while Mountagent Desk is in the background.", divider: false) {
+            SettingsRow(title: "Agent finished", detail: "A macOS notification when an agent finishes or stops; click it to open the session.", divider: false) {
                 Toggle("Agent finished", isOn: $notify).labelsHidden().toggleStyle(.switch)
             }
-            SettingsRow(title: "Chime", detail: "A short sound when an agent finishes (or fails) while you're in the app.") {
-                Toggle("Chime", isOn: $chime).labelsHidden().toggleStyle(.switch)
+            SettingsRow(title: "Also while the app is in front", detail: "For sessions you aren't looking at. The one on screen never notifies.") {
+                Toggle("Also while the app is in front", isOn: $notifyInFront).labelsHidden().toggleStyle(.switch)
+            }
+            .disabled(!notify)
+            SettingsRow(title: "Sound", detail: "Played when an agent finishes, in front or in the background.") {
+                HStack(spacing: 8) {
+                    soundPicker("Finished", $chimeSound)
+                    soundPicker("Failed", $failureSound)
+                    Toggle("Sound", isOn: $chime).labelsHidden().toggleStyle(.switch)
+                }
             }
             SettingsRow(title: "Dock badge counts unread sessions", detail: "Besides questions waiting for you, count sessions that finished while you were elsewhere; they also get a dot in the sidebar.") {
                 Toggle("Dock badge counts unread sessions", isOn: $badgeUnread).labelsHidden().toggleStyle(.switch)

@@ -1130,10 +1130,13 @@ final class AppModel {
                 if let endBranch { session.branch = endBranch }
             }
             persist(sessionID)
-            if NSApp.isActive == false, let session = sessions[sessionID] {
+            // Not for the session you're looking at; in front only if asked for.
+            let watching = NSApp.isActive && grid.pane(showing: sessionID) != nil
+            if !watching, NSApp.isActive == false || AppSettings.notifiesInFront, let session = sessions[sessionID] {
                 Notifier.turnFinished(session: session, result: reducer.lastResult, failure: failure)
-            } else if AppSettings.chimes, failure != AgentRun.stoppedMessage {
-                // In the background the notification has its own sound.
+            }
+            // The notifications are silent: this one sound, in front or not.
+            if AppSettings.chimes, failure != AgentRun.stoppedMessage {
                 Notifier.chime(failed: reducer.lastResult?.isError == true || (reducer.lastResult == nil && failure != nil))
             }
             if !NSApp.isActive || grid.pane(showing: sessionID) == nil { unread.insert(sessionID) }

@@ -14,9 +14,18 @@ enum AppSettings {
     static let notifyKey = "notifyWhenDone"
     static let chimeKey = "chimeWhenDone"
     static let badgeUnreadKey = "badgeUnreadSessions"
+    static let notifyInFrontKey = "notifyInFront"
+    static let chimeSoundKey = "chimeSound"
+    static let failureSoundKey = "failureSound"
 
-    /// A sound when a turn ends while the app is in front (on by default).
+    /// A sound when a turn ends, in front or in the background (on by default).
     static var chimes: Bool { UserDefaults.standard.object(forKey: chimeKey) as? Bool ?? true }
+    /// Notifications also while the app is in front, for sessions not on screen (on by default).
+    static var notifiesInFront: Bool { UserDefaults.standard.object(forKey: notifyInFrontKey) as? Bool ?? true }
+    static var chimeSound: String { UserDefaults.standard.string(forKey: chimeSoundKey) ?? "Glass" }
+    static var failureSound: String { UserDefaults.standard.string(forKey: failureSoundKey) ?? "Basso" }
+    /// macOS's own alert sounds (/System/Library/Sounds).
+    static let sounds = ["Glass", "Ping", "Hero", "Pop", "Purr", "Submarine", "Funk", "Blow", "Bottle", "Frog", "Morse", "Sosumi", "Tink", "Basso"]
     /// The Dock badge also counts finished turns not yet looked at (on by default).
     static var badgesUnread: Bool { UserDefaults.standard.object(forKey: badgeUnreadKey) as? Bool ?? true }
     /// Off until the user asks: reading Cursor's token makes macOS show a keychain prompt.
@@ -101,10 +110,15 @@ enum Notifier {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    /// A short system sound: Glass when a turn finished, Basso when it failed.
+    /// The chosen sound for a finished turn, or the failure one.
     @MainActor
     static func chime(failed: Bool) {
-        NSSound(named: failed ? "Basso" : "Glass")?.play()
+        play(failed ? AppSettings.failureSound : AppSettings.chimeSound)
+    }
+
+    @MainActor
+    static func play(_ name: String) {
+        NSSound(named: NSSound.Name(name))?.play()
     }
 
     static func permissionNeeded(session: ChatSession, request: PermissionRequest) {
@@ -132,7 +146,8 @@ enum Notifier {
         } else {
             content.body = "\(agent) finished."
         }
-        content.sound = .default
+        // Silent: the app plays the chosen sound itself (see `chime`).
+        content.sound = nil
         content.userInfo = [sessionKey: session.id.uuidString]
         let request = UNNotificationRequest(identifier: session.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)

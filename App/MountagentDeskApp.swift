@@ -133,6 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return question.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
     }
 
+    /// Shown in front too: the app only posts them for sessions you aren't looking at.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
     /// A click on a notification opens its session.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let id = (response.notification.request.content.userInfo[Notifier.sessionKey] as? String).flatMap(UUID.init(uuidString:))
