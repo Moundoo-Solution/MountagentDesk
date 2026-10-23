@@ -21,6 +21,7 @@ final class AppModel {
         set {
             grid.open(newValue)
             refreshDirty()
+            markVisibleSessionsRead()
         }
     }
     /// Working folders with uncommitted changes (the `*` after the branch). Only the selected
@@ -41,10 +42,26 @@ final class AppModel {
     /// Questions waiting per session, so checking a session (sidebar, panes) doesn't scan
     /// its items; also the Dock badge.
     private var pendingCounts: [UUID: Int] = [:] {
-        didSet {
-            let total = pendingCounts.values.reduce(0, +)
-            NSApp.dockTile.badgeLabel = total > 0 ? String(total) : nil
-        }
+        didSet { updateDockBadge() }
+    }
+    /// Sessions whose turn ended while you weren't looking at them (another session on
+    /// screen, or the app in the background): a dot in the sidebar and part of the badge.
+    private(set) var unread: Set<UUID> = [] {
+        didSet { updateDockBadge() }
+    }
+
+    /// Questions waiting plus finished turns not yet seen.
+    private func updateDockBadge() {
+        let waiting = pendingCounts.values.reduce(0, +)
+        let total = waiting + (AppSettings.badgesUnread ? unread.subtracting(pendingCounts.filter { $0.value > 0 }.keys).count : 0)
+        NSApp.dockTile.badgeLabel = total > 0 ? String(total) : nil
+    }
+
+    /// What's on screen counts as seen.
+    func markVisibleSessionsRead() {
+        guard NSApp.isActive, !unread.isEmpty else { return }
+        let shown = unread.filter { grid.pane(showing: $0) != nil }
+        if !shown.isEmpty { unread.subtract(shown) }
     }
     /// Prompts kept for reuse in the composer.
     private(set) var promptTemplates: [PromptTemplate] = []
@@ -271,7 +288,10 @@ final class AppModel {
             MainActor.assumeIsolated { if NSApp.isActive { self?.refreshDirty() } }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshDirty() }
+            MainActor.assumeIsolated {
+                self?.refreshDirty()
+                self?.markVisibleSessionsRead()
+            }
         }
     }
 
@@ -680,11 +700,13 @@ final class AppModel {
 
     func focusPane(_ index: Int) {
         grid.focus(index)
+        markVisibleSessionsRead()
     }
 
     func open(_ sessionID: UUID, inPane index: Int) {
         guard sessions[sessionID] != nil else { return }
         grid.open(sessionID, inPane: index)
+        markVisibleSessionsRead()
     }
 
     func clearPane(_ index: Int) {
@@ -732,6 +754,7 @@ final class AppModel {
         guard let session = sessions[sessionID] else { return }
         running[sessionID]?.cancel()
         SessionTerminals.shared.stop(sessionID)
+        unread.remove(sessionID)
         sessions[sessionID] = nil
         drafts[sessionID] = nil
         queued[sessionID] = nil
@@ -979,6 +1002,7 @@ final class AppModel {
                     pendingCounts[sessionID, default: 0] += 1
                     if !NSApp.isActive, let session = sessions[sessionID] {
                         Notifier.permissionNeeded(session: session, request: request)
+                        NSApp.requestUserAttention(.informationalRequest)
                     }
                 default:
                     break
@@ -1025,7 +1049,11 @@ final class AppModel {
             persist(sessionID)
             if NSApp.isActive == false, let session = sessions[sessionID] {
                 Notifier.turnFinished(session: session, result: reducer.lastResult, failure: failure)
+            } else if AppSettings.chimes, failure != AgentRun.stoppedMessage {
+                // In the background the notification has its own sound.
+                Notifier.chime(failed: reducer.lastResult?.isError == true || (reducer.lastResult == nil && failure != nil))
             }
+            if !NSApp.isActive || grid.pane(showing: sessionID) == nil { unread.insert(sessionID) }
             if let next = queued.removeValue(forKey: sessionID) {
                 send(next.text, attachments: next.attachments, images: next.images, in: sessionID)
             }

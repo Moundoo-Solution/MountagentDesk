@@ -302,6 +302,8 @@ private struct GeneralPane: View {
     @AppStorage(AppSettings.defaultAgentKey) private var defaultAgent = AgentKind.claude
     @AppStorage(AppSettings.defaultAccessKey) private var defaultAccess = AccessLevel.editFiles
     @AppStorage(AppSettings.notifyKey) private var notify = true
+    @AppStorage(AppSettings.chimeKey) private var chime = true
+    @AppStorage(AppSettings.badgeUnreadKey) private var badgeUnread = true
 
     var body: some View {
         SettingsSection(title: "New work") {
@@ -327,6 +329,12 @@ private struct GeneralPane: View {
         SettingsSection(title: "Notifications") {
             SettingsRow(title: "Agent finished", detail: "Notify when an agent finishes while Mountagent Desk is in the background.", divider: false) {
                 Toggle("Agent finished", isOn: $notify).labelsHidden().toggleStyle(.switch)
+            }
+            SettingsRow(title: "Chime", detail: "A short sound when an agent finishes (or fails) while you're in the app.") {
+                Toggle("Chime", isOn: $chime).labelsHidden().toggleStyle(.switch)
+            }
+            SettingsRow(title: "Dock badge counts unread sessions", detail: "Besides questions waiting for you, count sessions that finished while you were elsewhere; they also get a dot in the sidebar.") {
+                Toggle("Dock badge counts unread sessions", isOn: $badgeUnread).labelsHidden().toggleStyle(.switch)
             }
         }
 

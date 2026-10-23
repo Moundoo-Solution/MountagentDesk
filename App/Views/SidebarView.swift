@@ -425,10 +425,18 @@ private struct SessionCell: View {
                     .opacity(0.55 + 0.45 * abs(cos(phase * .pi)))
             }
         } else {
-            Text(session.updatedAt.shortAge)
-                .font(Theme.Font.caption)
-                .foregroundStyle(isSelected ? Theme.textSecondary : Theme.textTertiary)
-                .monospacedDigit()
+            HStack(spacing: 5) {
+                if model.unread.contains(session.id) {
+                    Circle()
+                        .fill(session.tint)
+                        .frame(width: 6, height: 6)
+                        .help("Finished while you were elsewhere")
+                }
+                Text(session.updatedAt.shortAge)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(isSelected ? Theme.textSecondary : Theme.textTertiary)
+                    .monospacedDigit()
+            }
         }
     }
 

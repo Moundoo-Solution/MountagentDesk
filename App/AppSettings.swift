@@ -1,4 +1,5 @@
 import MountagentDeskKit
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -11,6 +12,13 @@ enum AppSettings {
     static let defaultAgentKey = "defaultAgent"
     static let defaultAccessKey = "defaultAccess"
     static let notifyKey = "notifyWhenDone"
+    static let chimeKey = "chimeWhenDone"
+    static let badgeUnreadKey = "badgeUnreadSessions"
+
+    /// A sound when a turn ends while the app is in front (on by default).
+    static var chimes: Bool { UserDefaults.standard.object(forKey: chimeKey) as? Bool ?? true }
+    /// The Dock badge also counts finished turns not yet looked at (on by default).
+    static var badgesUnread: Bool { UserDefaults.standard.object(forKey: badgeUnreadKey) as? Bool ?? true }
     /// Off until the user asks: reading Cursor's token makes macOS show a keychain prompt.
     static let cursorUsageKey = "showCursorUsage"
     /// The `gh` account GitHub Copilot runs as; unset uses `copilot login`.
@@ -91,6 +99,12 @@ enum Notifier {
 
     static func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// A short system sound: Glass when a turn finished, Basso when it failed.
+    @MainActor
+    static func chime(failed: Bool) {
+        NSSound(named: failed ? "Basso" : "Glass")?.play()
     }
 
     static func permissionNeeded(session: ChatSession, request: PermissionRequest) {
