@@ -105,6 +105,15 @@ public enum ServerRun {
                 }
             }
         }
+        // What was written just before a stop is still worth returning.
+        if note != nil {
+            var drain = pollfd(fd: outputEnd, events: Int16(POLLIN), revents: 0)
+            while output.count <= outputLimit, poll(&drain, 1, 0) > 0, (drain.revents & Int16(POLLIN)) != 0 {
+                let count = read(outputEnd, &buffer, buffer.count)
+                guard count > 0 else { break }
+                output.append(buffer, count: count)
+            }
+        }
         close(outputEnd)
         close(master)
         var status: Int32 = 0

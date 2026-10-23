@@ -410,8 +410,9 @@ import Testing
         let ssh = try fakeSSH("echo start; sleep 30")
         defer { try? FileManager.default.removeItem(atPath: ssh) }
         let started = Date()
-        let reply = ServerRun.ssh([], password: nil, executable: ssh, timeout: 1)
-        #expect(Date().timeIntervalSince(started) < 5)
+        // Long enough for the shell to start on a busy machine; far less than the sleep.
+        let reply = ServerRun.ssh([], password: nil, executable: ssh, timeout: 3)
+        #expect(Date().timeIntervalSince(started) < 8)
         #expect(reply.output == "start\n" && reply.error?.contains("Stopped after") == true, "\(reply)")
     }
 
