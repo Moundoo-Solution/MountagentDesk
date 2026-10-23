@@ -86,6 +86,7 @@ struct SettingsView: View {
         case .general: GeneralPane()
         case .appearance: AppearancePane()
         case .agents: AgentsPane()
+        case .schedules: SchedulesPane()
         case .voice: VoicePane()
         case .git: GitPane()
         case .servers: ServersSettingsPane()
@@ -97,7 +98,7 @@ struct SettingsView: View {
 // MARK: - Panes list
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, appearance, agents, voice, git, servers, paths
+    case general, appearance, agents, schedules, voice, git, servers, paths
 
     static let key = "settingsPane"
     var id: String { rawValue }
@@ -112,6 +113,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "General"
         case .appearance: "Appearance"
         case .agents: "Agents"
+        case .schedules: "Schedules"
         case .voice: "Voice"
         case .git: "Git Accounts"
         case .servers: "Servers"
@@ -124,6 +126,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "Defaults for new projects and sessions, and notifications."
         case .appearance: "How Mountagent Desk looks."
         case .agents: "Switch coding agents on or off, and see their accounts, plans and usage."
+        case .schedules: "Prompts an agent runs on its own at set times, each run in a new session of its project. They run while Mountagent Desk is open; a run missed while it was closed happens once when it opens."
         case .voice: "Dictate messages instead of typing them."
         case .git: "The identities projects commit and push as. Pick one per project in Folders & Name; it goes into each repository's .git/config, so agents, terminals and other Git apps use it too."
         case .servers: "Live, UAT and test machines you reach over SSH. Link them to projects in Folders & Name, open terminals from the right panel's Servers, and decide per server whether agents may read it."
@@ -136,6 +139,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape.fill"
         case .appearance: "paintpalette.fill"
         case .agents: "person.2.fill"
+        case .schedules: "clock.fill"
         case .voice: "mic.fill"
         case .git: "arrow.triangle.branch"
         case .servers: "server.rack"
@@ -148,6 +152,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: Color(light: 0x6B7280, dark: 0x8B93A1)
         case .appearance: Color(light: 0x8B3FD9, dark: 0x9F67F0)
         case .agents: Color(light: 0xC15F3C, dark: 0xD97757)
+        case .schedules: Color(light: 0x0E7C86, dark: 0x2BB3BF)
         case .voice: Color(light: 0xD9304F, dark: 0xE5486A)
         case .git: Color(light: 0x1F6FEB, dark: 0x2F81F7)
         case .servers: Color(light: 0xB25E09, dark: 0xF0A04B)
@@ -160,6 +165,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "default agent access permission notification notify plan read only full"
         case .appearance: "theme dark light mode color sidebar width"
         case .agents: "claude cursor codex antigravity gemini opencode copilot kiro amp kimi grok mistral vibe droid terminal openai google enable disable on off account usage plan sign in login install update limit cost"
+        case .schedules: "schedule scheduled task cron timer daily weekly hourly automation recurring every morning"
         case .voice: "microphone mic dictation speech language vietnamese english send"
         case .git: "github ssh key email name commit push identity avatar"
         case .servers: "server ssh live uat test production terminal log psql termius agent read only"

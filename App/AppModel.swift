@@ -274,6 +274,7 @@ final class AppModel {
             serverHelperDirectory = try? ServerHelper.installWrapper(executable: executable, in: store.root)
         }
         startHelperListener()
+        startSchedules()
         cursorUsage = store.load(CursorUsage.self, named: "cursor-usage")
         refreshAccounts()
         refreshPlanUsage()
@@ -395,6 +396,88 @@ final class AppModel {
     /// Working, or about to (taking the turn's checkpoint first).
     func isRunning(_ sessionID: UUID) -> Bool {
         running[sessionID] != nil || preparing.contains(sessionID) || settingUpWorktree.contains(sessionID)
+    }
+
+    // MARK: Scheduled tasks
+
+    /// Prompts agents run on their own at set times (Settings → Schedules).
+    private(set) var scheduledTasks: [ScheduledTask] = []
+    @ObservationIgnored private var scheduleTimer: Timer?
+
+    func saveScheduledTask(_ task: ScheduledTask) {
+        if let index = scheduledTasks.firstIndex(where: { $0.id == task.id }) {
+            scheduledTasks[index] = task
+        } else {
+            scheduledTasks.append(task)
+        }
+        persistScheduledTasks()
+    }
+
+    func deleteScheduledTask(_ id: UUID) {
+        scheduledTasks.removeAll { $0.id == id }
+        persistScheduledTasks()
+    }
+
+    private func persistScheduledTasks() {
+        do {
+            try store.save(scheduledTasks, named: "scheduled-tasks")
+        } catch {
+            alert = "Could not save the schedules: \(error.localizedDescription)"
+        }
+    }
+
+    private func startSchedules() {
+        scheduledTasks = store.load([ScheduledTask].self, named: "scheduled-tasks") ?? []
+        scheduleTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.runDueTasks() }
+        }
+        // After launch settles (accounts read, CLIs found): catch up on a run missed while closed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in self?.runDueTasks() }
+    }
+
+    private func runDueTasks(now: Date = .now) {
+        for task in scheduledTasks where task.isDue(at: now) {
+            runScheduledTask(task.id)
+        }
+    }
+
+    /// Starts a run now, in a new session that isn't brought to the front.
+    func runScheduledTask(_ id: UUID) {
+        guard var task = scheduledTasks.first(where: { $0.id == id }) else { return }
+        // Recorded first, so the timer can't start the same run twice.
+        task.lastRun = .now
+        guard let project = project(task.projectID), isEnabled(task.agent) else {
+            saveScheduledTask(task)
+            return
+        }
+        var session = ChatSession(projectID: project.id, title: "\(task.name) · \(Date.now.formatted(date: .abbreviated, time: .shortened))",
+                                  agent: task.agent, access: task.access)
+        session.branch = branch(of: project)
+        task.lastSessionID = session.id
+        saveScheduledTask(task)
+        let prompt = task.prompt
+        guard task.inWorktree else {
+            sessions[session.id] = session
+            persist(session.id)
+            send(prompt, attachments: [], in: session.id)
+            return
+        }
+        let repository = project.url, name = task.name, sessionID = session.id
+        Task {
+            do {
+                let created = try await Task.detached { try GitWorktree.create(in: repository, title: name, id: sessionID) }.value
+                session.worktree = created.path.path
+                session.worktreeBranch = created.branch
+                session.branch = created.branch
+                sessions[session.id] = session
+                persist(session.id)
+                setUpWorktree(of: session.id, in: project) { [weak self] in self?.send(prompt, attachments: [], in: session.id) }
+            } catch {
+                session.items.append(ChatItem(kind: .notice, text: "Couldn't make a worktree for \(name): \(error.localizedDescription)", isError: true))
+                sessions[session.id] = session
+                persist(session.id)
+            }
+        }
     }
 
     // MARK: Pull requests
