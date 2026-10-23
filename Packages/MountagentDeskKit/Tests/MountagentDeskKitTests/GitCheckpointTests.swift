@@ -85,6 +85,16 @@ import Testing
         try "dirty\n".write(to: created.path.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
         #expect(throws: (any Error).self) { try GitWorktree.remove(created.path, from: repo) }
         try GitWorktree.remove(created.path, from: repo, force: true)
+
+        // Named branches: a new one from HEAD, then an existing one checked out.
+        let fresh = try GitWorktree.create(in: repo, branch: "feature/quotes", id: UUID())
+        #expect(fresh.branch == "feature/quotes")
+        try GitWorktree.remove(fresh.path, from: repo)
+        let again = try GitWorktree.create(in: repo, branch: "feature/quotes", id: UUID())
+        #expect(try git.run(["-C", again.path.path, "branch", "--show-current"]).output.trimmingCharacters(in: .whitespacesAndNewlines) == "feature/quotes")
+        try GitWorktree.remove(again.path, from: repo)
+        #expect(throws: (any Error).self) { try GitWorktree.create(in: repo, branch: "bad..name", id: UUID()) }
+        #expect(GitWorktree.branches(in: repo).contains("feature/quotes"))
         #expect(!FileManager.default.fileExists(atPath: created.path.path))
         #expect(!FileManager.default.fileExists(atPath: created.path.deletingLastPathComponent().path))
         #expect(try git.run(["branch", "--list", created.branch]).output.contains(created.branch))

@@ -50,6 +50,42 @@ final class AppModel {
     private(set) var promptTemplates: [PromptTemplate] = []
     /// The ⌘K session switcher is open.
     var showsSwitcher = false
+    /// The ⌘T quick launch sheet is open.
+    var showsQuickLaunch = false
+
+    /// A new session of `agent` in `project`, or, with a branch, in a worktree on that
+    /// branch (checked out if it exists, else made from HEAD); `message` goes first.
+    func quickLaunch(in project: Project, agent: AgentKind, branch: String, message: String) {
+        let name = branch.trimmingCharacters(in: .whitespaces)
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            let session = newSession(in: project, agent: agent)
+            if !text.isEmpty { send(text, attachments: [], in: session.id) }
+            return
+        }
+        let repository = project.url
+        let id = UUID()
+        Task {
+            do {
+                let created = try await Task.detached { () -> GitWorktree.Created in
+                    guard GitCheckpoint.isRepository(repository) else {
+                        throw NSError(domain: "Worktree", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(repository.lastPathComponent) isn't the top folder of a git repository."])
+                    }
+                    return try GitWorktree.create(in: repository, branch: name, id: id)
+                }.value
+                let session = newSession(in: project, agent: agent)
+                update(session.id) {
+                    $0.worktree = created.path.path
+                    $0.worktreeBranch = created.branch
+                    $0.branch = created.branch
+                }
+                persist(session.id)
+                if !text.isEmpty { send(text, attachments: [], in: session.id) }
+            } catch {
+                alert = "Couldn't make a worktree on \(name): \(error.localizedDescription)"
+            }
+        }
+    }
 
     func savePromptTemplates(_ templates: [PromptTemplate]) {
         promptTemplates = templates

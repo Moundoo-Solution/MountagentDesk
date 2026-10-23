@@ -65,6 +65,9 @@ struct MountagentDeskApp: App {
                 Button("Go to Session…") { model.showsSwitcher = true }
                     .keyboardShortcut("k")
                     .disabled(model.sessions.isEmpty)
+                Button("Quick Launch…") { model.showsQuickLaunch = true }
+                    .keyboardShortcut("t")
+                    .disabled(model.projects.isEmpty)
                 Divider()
                 Button("Stop Agent") {
                     if let id = model.selectedSessionID { model.stop(id) }
