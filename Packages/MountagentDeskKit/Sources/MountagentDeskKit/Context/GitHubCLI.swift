@@ -92,7 +92,7 @@ public enum GitHubCLI {
 
     /// The account's token, handed to each `gh` call so requests act as that account
     /// whichever one `gh` currently treats as active.
-    private static func token(for login: String) -> String? {
+    public static func token(for login: String) -> String? {
         let value = (try? run(["auth", "token", "--hostname", "github.com", "--user", login]))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil

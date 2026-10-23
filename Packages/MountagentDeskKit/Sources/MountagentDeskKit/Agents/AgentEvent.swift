@@ -67,6 +67,12 @@ public struct AgentRunRequest: Sendable {
     public var sessionTitle: String?
     /// Images to show the agent with this message (PNG / JPEG / GIF / WebP files).
     public var images: [URL] = []
+    /// The project has servers; agents must not reach them with their own ssh.
+    public var linksServers = false
+    /// Some of them are readable through `mountagent-server`.
+    public var readsServers = false
+    /// Added to the agent's environment (the server helper on PATH, the project id).
+    public var environment: [String: String] = [:]
 
     public init(
         prompt: String,
@@ -168,6 +174,7 @@ public enum AgentProviders {
         case .cursor: CursorProvider()
         case .codex: CodexProvider()
         case .antigravity: AntigravityProvider()
+        case .copilot: CopilotProvider()
         }
     }
 }

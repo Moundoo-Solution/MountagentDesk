@@ -5,12 +5,16 @@ import UserNotifications
 /// UserDefaults keys, shared by `@AppStorage` in views and by the model.
 enum AppSettings {
     static let claudePathKey = "claudePath"
+    /// The transcript and composer fill the pane instead of a centred reading column.
+    static let fullWidthChatKey = "fullWidthChat"
     static let cursorPathKey = "cursorPath"
     static let defaultAgentKey = "defaultAgent"
     static let defaultAccessKey = "defaultAccess"
     static let notifyKey = "notifyWhenDone"
     /// Off until the user asks: reading Cursor's token makes macOS show a keychain prompt.
     static let cursorUsageKey = "showCursorUsage"
+    /// The `gh` account GitHub Copilot runs as; unset uses `copilot login`.
+    static let copilotAccountKey = "copilotGitHubAccount"
 
     /// The agents switched on in Settings → Agents, as a comma list.
     static let enabledAgentsKey = "enabledAgents"
@@ -82,6 +86,9 @@ enum AppSettings {
 }
 
 enum Notifier {
+    /// The session a notification is about, in its user info.
+    static let sessionKey = "sessionID"
+
     static func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
@@ -91,17 +98,28 @@ enum Notifier {
         content.title = session.title
         content.body = "\(session.agent.displayName) wants to use \(request.toolName): \(request.summary)"
         content.sound = .default
+        content.userInfo = [sessionKey: session.id.uuidString]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: request.id, content: content, trigger: nil))
     }
 
-    static func turnFinished(session: ChatSession, result: TurnResult?) {
+    /// `failure` is the CLI's own error, if it reported one; no result at all means the turn
+    /// ended without finishing (a crash, a sign-in problem, a stop).
+    static func turnFinished(session: ChatSession, result: TurnResult?, failure: String? = nil) {
         guard UserDefaults.standard.object(forKey: AppSettings.notifyKey) as? Bool ?? true else { return }
         let content = UNMutableNotificationContent()
         content.title = session.title
-        content.body = result?.isError == true
-            ? "\(session.agent.displayName) stopped with an error."
-            : "\(session.agent.displayName) finished."
+        let agent = session.agent.displayName
+        if let failure, result == nil || result?.isError == true {
+            content.body = "\(agent) stopped: \(failure.prefix(140))"
+        } else if result == nil {
+            content.body = "\(agent) stopped without finishing."
+        } else if result?.isError == true {
+            content.body = "\(agent) stopped with an error."
+        } else {
+            content.body = "\(agent) finished."
+        }
         content.sound = .default
+        content.userInfo = [sessionKey: session.id.uuidString]
         let request = UNNotificationRequest(identifier: session.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

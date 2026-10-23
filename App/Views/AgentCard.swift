@@ -19,6 +19,12 @@ struct AgentCard: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(14)
+            if enabled, kind == .copilot {
+                divider
+                CopilotAccountPicker()
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            }
             if !enabled {
                 EmptyView()
             } else if ready {
@@ -59,7 +65,7 @@ struct AgentCard: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: kind.symbolName)
+            Image(symbol: kind.symbolName)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 34, height: 34)
@@ -182,7 +188,7 @@ struct AgentCard: View {
             }
         case .cursor:
             cursorLimits
-        case .codex, .antigravity:
+        case .codex, .antigravity, .copilot:
             HStack(spacing: 10) {
                 Image(systemName: "chart.bar.xaxis").foregroundStyle(Theme.textTertiary)
                 Text("\(kind.displayName)'s CLI doesn't report plan limits. Signed in with \(account?.authMethod ?? "an account").")
@@ -328,7 +334,9 @@ struct AgentCard: View {
     private var setupPrompt: some View {
         let installed = account?.isInstalled == true
         return HStack(spacing: 12) {
-            Text(installed
+            Text(kind == .copilot && installed
+                ? "Pick a GitHub account with Copilot above, or sign in through your browser."
+                : installed
                 ? "Sign in through your browser to use \(kind.displayName) here."
                 : "Mountagent Desk runs \(kind.displayName) through its CLI. Install it, then sign in through your browser.")
                 .font(Theme.Font.ui)
@@ -339,6 +347,66 @@ struct AgentCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.action)
         }
+    }
+}
+
+/// Which GitHub account Copilot runs as: one of those signed in to `gh` (its token is handed
+/// to each turn), or Copilot's own `copilot login`.
+private struct CopilotAccountPicker: View {
+    @Environment(AppModel.self) private var model
+    @State private var logins: [String] = []
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("GitHub account")
+                .font(Theme.Font.ui)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            Picker("GitHub account", selection: Binding(get: { model.copilotAccount }, set: { model.setCopilotAccount($0) })) {
+                Text("Copilot's own sign-in").tag(String?.none)
+                ForEach(logins, id: \.self) { login in
+                    Text(login).tag(String?.some(login))
+                }
+                if let current = model.copilotAccount, !logins.contains(current) {
+                    Text(current).tag(String?.some(current))
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help("Copilot runs as this account, with its GitHub CLI (gh) sign-in. The account needs a Copilot plan; each prompt uses a premium request.")
+        }
+        .task { logins = await Task.detached { GitHubCLI.accounts() }.value }
+        CopilotTokenField()
+    }
+}
+
+/// An optional token made for Copilot alone, kept in the keychain.
+private struct CopilotTokenField: View {
+    @Environment(AppModel.self) private var model
+    @State private var token = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Copilot token")
+                .font(Theme.Font.ui)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            SecureField("Token", text: $token, prompt: Text(model.hasCopilotToken ? "Saved in Keychain" : "Optional"))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 220)
+                .onSubmit { save() }
+            if model.hasCopilotToken {
+                Button("Forget") { model.saveCopilotToken(nil) }
+            } else {
+                Button("Save", action: save).disabled(token.isEmpty)
+            }
+        }
+        .help("A fine-grained GitHub token with only the \u{201C}Copilot Requests\u{201D} permission. Copilot then runs with it instead of the GitHub CLI's sign-in token, which could also push to your repositories or add SSH keys.")
+    }
+
+    private func save() {
+        model.saveCopilotToken(token)
+        token = ""
     }
 }
 
@@ -519,7 +587,7 @@ struct SetupSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: task.symbolName ?? task.kind?.symbolName ?? "terminal")
+                Image(symbol: task.symbolName ?? task.kind?.symbolName ?? "terminal")
                     .foregroundStyle(task.kind?.tint ?? Theme.textPrimary)
                 Text(task.title)
                     .font(Theme.Font.title)
@@ -556,7 +624,7 @@ struct SetupSheet: View {
                 exitCode = .some(code)
             }
             .padding(10)
-            .background(Theme.codeBackground)
+            .background(TerminalTheme.current.background(dark: colorScheme == .dark))
 
             HStack {
                 Text(task.command)

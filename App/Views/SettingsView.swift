@@ -88,6 +88,7 @@ struct SettingsView: View {
         case .agents: AgentsPane()
         case .voice: VoicePane()
         case .git: GitPane()
+        case .servers: ServersSettingsPane()
         case .paths: PathsPane()
         }
     }
@@ -96,7 +97,7 @@ struct SettingsView: View {
 // MARK: - Panes list
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, appearance, agents, voice, git, paths
+    case general, appearance, agents, voice, git, servers, paths
 
     static let key = "settingsPane"
     var id: String { rawValue }
@@ -113,6 +114,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .agents: "Agents"
         case .voice: "Voice"
         case .git: "Git Accounts"
+        case .servers: "Servers"
         case .paths: "CLI Paths"
         }
     }
@@ -124,6 +126,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .agents: "Switch coding agents on or off, and see their accounts, plans and usage."
         case .voice: "Dictate messages instead of typing them."
         case .git: "The identities projects commit and push as. Pick one per project in Folders & Name; it goes into each repository's .git/config, so agents, terminals and other Git apps use it too."
+        case .servers: "Live, UAT and test machines you reach over SSH. Link them to projects in Folders & Name, open terminals from the right panel's Servers, and decide per server whether agents may read it."
         case .paths: "Where Mountagent Desk finds each agent's command-line tool (claude, cursor-agent, codex, agy)."
         }
     }
@@ -135,6 +138,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .agents: "person.2.fill"
         case .voice: "mic.fill"
         case .git: "arrow.triangle.branch"
+        case .servers: "server.rack"
         case .paths: "terminal.fill"
         }
     }
@@ -146,6 +150,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .agents: Color(light: 0xC15F3C, dark: 0xD97757)
         case .voice: Color(light: 0xD9304F, dark: 0xE5486A)
         case .git: Color(light: 0x1F6FEB, dark: 0x2F81F7)
+        case .servers: Color(light: 0xB25E09, dark: 0xF0A04B)
         case .paths: Color(light: 0x0F8A5F, dark: 0x2EA772)
         }
     }
@@ -157,6 +162,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .agents: "claude cursor codex antigravity openai google enable disable on off account usage plan sign in login install update limit cost"
         case .voice: "microphone mic dictation speech language vietnamese english send"
         case .git: "github ssh key email name commit push identity avatar"
+        case .servers: "server ssh live uat test production terminal log psql termius agent read only"
         case .paths: "cli path executable version claude cursor-agent terminal"
         }
     }
@@ -168,17 +174,12 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     }
 }
 
-/// A colored rounded square with a white glyph, as System Settings marks its panes.
 private struct PaneIcon: View {
     let pane: SettingsPane
     var size: CGFloat = 22
 
     var body: some View {
-        Image(systemName: pane.symbol)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(pane.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
+        TintedIcon(symbol: pane.symbol, tint: pane.tint, size: size)
     }
 }
 
@@ -307,7 +308,7 @@ private struct GeneralPane: View {
             SettingsRow(title: "Default agent", detail: "Used for new projects and new sessions. You can switch agents inside any chat.", divider: false) {
                 Picker("Default agent", selection: Binding(get: { model.isEnabled(defaultAgent) ? defaultAgent : AppSettings.defaultAgent }, set: { defaultAgent = $0 })) {
                     ForEach(model.agentChoices) { agent in
-                        Label(agent.shortName, systemImage: agent.symbolName).tag(agent)
+                        Label { Text(agent.shortName) } icon: { Image(symbol: agent.symbolName) }.tag(agent)
                     }
                 }
                 .labelsHidden()
@@ -374,6 +375,7 @@ private struct AppearancePane: View {
     @AppStorage(Appearance.key) private var appearance = Appearance.system
     @AppStorage(AppSettings.sidebarWidthKey) private var sidebarWidth = AppSettings.defaultSidebarWidth
     @AppStorage(AppSettings.inspectorWidthKey) private var inspectorWidth = AppSettings.defaultInspectorWidth
+    @AppStorage(TerminalTheme.key) private var terminalTheme = TerminalTheme.app
 
     var body: some View {
         SettingsSection(title: "Theme") {
@@ -382,6 +384,17 @@ private struct AppearancePane: View {
                     ThemeTile(option: option, selected: appearance == option) {
                         appearance = option
                         option.apply()
+                    }
+                }
+            }
+            .padding(16)
+        }
+
+        SettingsSection(title: "Terminal Colors", footer: "For the Terminal panel and server tabs. Programs choose which colors they use; ls, git and most prompts show them.") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12)], spacing: 12) {
+                ForEach(TerminalTheme.allCases) { option in
+                    TerminalThemeTile(theme: option, selected: terminalTheme == option) {
+                        terminalTheme = option
                     }
                 }
             }
@@ -399,6 +412,49 @@ private struct AppearancePane: View {
     }
 }
 
+/// A few lines of a shell session in the scheme's colors.
+private struct TerminalThemeTile: View {
+    let theme: TerminalTheme
+    let selected: Bool
+    let select: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let scheme = theme.scheme(dark: colorScheme == .dark)
+        Button(action: select) {
+            VStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    line([("deploy@uat", scheme.ansi[2]), (":", scheme.foreground), ("~", scheme.ansi[4]), ("$ ls", scheme.foreground)])
+                    line([("app ", scheme.ansi[12]), ("config.yml ", scheme.foreground), ("run.sh", scheme.ansi[10])])
+                    line([("ERROR ", scheme.ansi[9]), ("WARNING ", scheme.ansi[11]), ("INFO", scheme.ansi[14])])
+                    line([("● ", scheme.ansi[13]), ("active (running)", scheme.ansi[2])])
+                }
+                .font(.system(size: 9, design: .monospaced))
+                .padding(8)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+                .background(Color(nsColor: NSColor(hex: scheme.background)))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(selected ? Theme.action : Theme.stroke, lineWidth: selected ? 2 : 1)
+                )
+                Text(theme.title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func line(_ parts: [(String, UInt32)]) -> some View {
+        parts.reduce(Text("")) { text, part in
+            text + Text(part.0).foregroundColor(Color(nsColor: NSColor(hex: part.1)))
+        }
+        .lineLimit(1)
+    }
+}
+
 /// A miniature window in that appearance; System shows both halves.
 private struct ThemeTile: View {
     let option: Appearance
@@ -412,6 +468,7 @@ private struct ThemeTile: View {
                     switch option {
                     case .light: preview(dark: false)
                     case .dark: preview(dark: true)
+                    case .dim: preview(dark: true, dim: true)
                     case .system:
                         preview(dark: false)
                             .overlay { preview(dark: true).mask(DiagonalHalf()) }
@@ -434,9 +491,9 @@ private struct ThemeTile: View {
         .buttonStyle(.plain)
     }
 
-    private func preview(dark: Bool) -> some View {
-        let background = Color(nsColor: NSColor(hex: dark ? Theme.Hex.backgroundDark : Theme.Hex.backgroundLight))
-        let sidebar = Color(nsColor: NSColor(hex: dark ? Theme.Hex.sidebarDark : Theme.Hex.sidebarLight))
+    private func preview(dark: Bool, dim: Bool = false) -> some View {
+        let background = Color(nsColor: NSColor(hex: !dark ? Theme.Hex.backgroundLight : dim ? Theme.Hex.backgroundDim : Theme.Hex.backgroundBlack))
+        let sidebar = Color(nsColor: NSColor(hex: !dark ? Theme.Hex.sidebarLight : dim ? Theme.Hex.sidebarDim : Theme.Hex.sidebarBlack))
         let ink = Color(nsColor: NSColor(hex: dark ? Theme.Hex.inkDark : Theme.Hex.inkLight))
         return HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 5) {

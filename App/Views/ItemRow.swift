@@ -41,7 +41,7 @@ private struct AgentHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: agent.symbolName)
+            Image(symbol: agent.symbolName)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(agent.tint)
                 .frame(width: 14)
@@ -162,6 +162,11 @@ struct TurnActions: View {
                 action("arrow.triangle.branch", help: "Fork: new session from here") {
                     model?.fork(sessionID, through: anchor.id)
                 }
+                if model?.isRunning(sessionID) == false, model?.checkpoint(beforeTurnOf: anchor.id, in: sessionID) != nil {
+                    action("arrow.uturn.backward", help: "Revert this turn: put the files back as they were before it") {
+                        model?.revertTurn(of: anchor.id, in: sessionID)
+                    }
+                }
                 Text(anchor.date.age)
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.textTertiary)
@@ -192,7 +197,6 @@ private struct ThinkingRow: View {
     let item: ChatItem
     let isStreaming: Bool
     @State private var expanded = false
-    @State private var pulse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -204,8 +208,16 @@ private struct ThinkingRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(width: 16)
-                    Text(isStreaming ? "Thinking…" : "Thought")
-                        .opacity(isStreaming && pulse ? 0.45 : 1)
+                    if isStreaming {
+                        // A timeline rather than a repeating animation, which would keep
+                        // redrawing after the thought is done.
+                        TimelineView(.animation(minimumInterval: Theme.animationInterval)) { context in
+                            let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 1.8
+                            Text("Thinking…").opacity(0.45 + 0.55 * abs(cos(phase * .pi)))
+                        }
+                    } else {
+                        Text("Thought")
+                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Theme.textTertiary)
@@ -219,10 +231,6 @@ private struct ThinkingRow: View {
                 .hoverHighlight()
             }
             .buttonStyle(.plain)
-            .onAppear {
-                guard isStreaming else { return }
-                withAnimation(.easeInOut(duration: 0.9).repeatForever()) { pulse = true }
-            }
 
             if expanded {
                 Text(item.text)
@@ -616,6 +624,8 @@ private struct PermissionRow: View {
 
 private struct NoticeRow: View {
     let item: ChatItem
+    @Environment(AppModel.self) private var model: AppModel?
+    @Environment(\.sessionID) private var sessionID
 
     var body: some View {
         if item.isError {
@@ -637,6 +647,14 @@ private struct NoticeRow: View {
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize()
+                if item.checkpoint != nil, let sessionID {
+                    Button("Undo") { model?.undoRevert(item.id, in: sessionID) }
+                        .buttonStyle(.plain)
+                        .font(Theme.Font.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .disabled(model?.isRunning(sessionID) != false)
+                        .help("Bring back the files as they were before the revert")
+                }
                 Rectangle().fill(Theme.hairline).frame(height: 1)
             }
         }

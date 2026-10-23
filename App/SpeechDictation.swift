@@ -27,7 +27,7 @@ final class SpeechDictation {
     /// Words the agents' users say often, so mixed Vietnamese and English comes out right.
     private static let vocabulary = [
         "sync", "ticket", "task", "commit", "push", "pull", "merge", "branch", "staging", "main",
-        "cherry-pick", "rebase", "pull request", "Claude", "Cursor", "Odoo", "module", "model",
+        "cherry-pick", "rebase", "pull request", "Claude", "Cursor", "module", "model",
         "view", "field", "test", "deploy", "bug", "fix", "refactor", "API", "SQL", "Python",
     ]
 

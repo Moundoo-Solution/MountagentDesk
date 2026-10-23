@@ -5,9 +5,17 @@ import Foundation
 /// message instead of hanging, and editors are skipped (`GIT_EDITOR=true`).
 public struct GitClient: Sendable {
     public let root: URL
+    /// Off for the app's own bookkeeping (checkpoints, worktrees): a hook there would run
+    /// code the agent planted, uninvited.
+    let runsHooks: Bool
 
     public init(root: URL) {
+        self.init(root: root, runsHooks: true)
+    }
+
+    init(root: URL, runsHooks: Bool) {
         self.root = root
+        self.runsHooks = runsHooks
     }
 
     // MARK: Status
@@ -336,9 +344,12 @@ public struct GitClient: Sendable {
     func run(_ arguments: [String], allowFailure: Bool = false, environment extra: [String: String] = [:]) throws -> Output {
         let process = Process()
         process.executableURL = ExecutableLocator.find("git") ?? URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", root.path, "-c", "core.quotepath=off", "-c", "color.ui=false"] + arguments
+        process.arguments = ["-C", root.path, "-c", "core.quotepath=off", "-c", "color.ui=false"]
+            + (try GitSafety.arguments(arguments, root: root, runsHooks: runsHooks))
         var environment = ExecutableLocator.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
+        // Reads (status every few seconds) mustn't take index.lock or rewrite .git/index.
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
         environment["GIT_EDITOR"] = "true"
         environment["GIT_SEQUENCE_EDITOR"] = "true"
         environment["GIT_MERGE_AUTOEDIT"] = "no"

@@ -43,11 +43,51 @@ public enum GitLog {
     private static let record = "\u{1E}"
 
     /// `branch` (or any revision) and its ancestors, newest first.
-    public static func commits(in root: URL, branch: String = "HEAD", limit: Int = 500) -> [Commit] {
-        let arguments = ["log", "--date-order", "--format=%H\(field)%P\(field)%an\(field)%ae\(field)%at\(field)%D\(field)%s\(record)",
-                         "-n", String(limit), branch, "--"]
+    /// With `authors` (emails), only their commits; git ORs the `--author` patterns, and
+    /// `--fixed-strings` keeps an email's dots and pluses literal; case doesn't matter.
+    public static func commits(in root: URL, branch: String = "HEAD", limit: Int = 500, authors: [String] = []) -> [Commit] {
+        var arguments = ["log", "--date-order", "--format=%H\(field)%P\(field)%an\(field)%ae\(field)%at\(field)%D\(field)%s\(record)",
+                         "-n", String(limit)]
+        if !authors.isEmpty {
+            arguments += ["--fixed-strings", "--regexp-ignore-case"]
+            arguments += authors.map { "--author=<\($0)>" }
+        }
+        arguments += [branch, "--"]
         guard let output = try? GitInspector(root: root).git(arguments) else { return [] }
         return parse(output)
+    }
+
+    /// Someone who committed on a branch, and how often.
+    public struct Author: Identifiable, Hashable, Sendable {
+        public var name: String
+        public var email: String
+        public var commits: Int
+        public var id: String { email.lowercased() }
+    }
+
+    /// The branch's committers among its latest `limit` commits, most commits first. One
+    /// entry per email, named as most of its commits are.
+    public static func authors(in root: URL, branch: String = "HEAD", limit: Int = 5000) -> [Author] {
+        guard let output = try? GitInspector(root: root).git(["shortlog", "-sne", "--max-count=\(limit)", branch, "--"]) else { return [] }
+        return parseAuthors(output)
+    }
+
+    /// `git shortlog -sne` lines: `   42\tName <email>`.
+    static func parseAuthors(_ output: String) -> [Author] {
+        var byEmail: [String: Author] = [:]
+        for line in output.components(separatedBy: .newlines) {
+            guard let match = line.firstMatch(of: /^\s*(\d+)\t(.*?)\s*<([^>]*)>\s*$/), let count = Int(match.1) else { continue }
+            let email = String(match.3)
+            let key = email.lowercased()
+            if var known = byEmail[key] {
+                // shortlog lists the busier name first; keep it, add the counts.
+                known.commits += count
+                byEmail[key] = known
+            } else {
+                byEmail[key] = Author(name: String(match.2), email: email, commits: count)
+            }
+        }
+        return byEmail.values.sorted { ($0.commits, $1.name) > ($1.commits, $0.name) }
     }
 
     static func parse(_ output: String) -> [Commit] {

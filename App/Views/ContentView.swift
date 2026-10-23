@@ -30,6 +30,7 @@ struct ContentView: View {
             FoldersView(project: project)
         }
         .sheet(item: model.setupBinding(for: .main)) { SetupSheet(task: $0) }
+        .sheet(isPresented: Binding(get: { model.showsSwitcher }, set: { model.showsSwitcher = $0 })) { SessionSwitcher() }
         .alert("Mountagent Desk", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -140,7 +141,7 @@ private struct WelcomeView: View {
         VStack(spacing: 16) {
             HStack(spacing: 8) {
                 ForEach(model.agentChoices) { agent in
-                    Image(systemName: agent.symbolName)
+                    Image(symbol: agent.symbolName)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(agent.tint)
                         .frame(width: 36, height: 36)

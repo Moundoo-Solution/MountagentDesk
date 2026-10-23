@@ -23,6 +23,10 @@ import SwiftUI
 /// - `MOUNTAGENT_SHOW_SETTINGS=<pane>`, `MOUNTAGENT_SHOW_FOLDERS`, `MOUNTAGENT_SHOW_GIT`
 ///   (`editor` for the account editor), `MOUNTAGENT_SHOW_GIT_WINDOW=changes|history`,
 ///   `MOUNTAGENT_NEW_BRANCH=<repo>` open those windows and sheets.
+/// - `MOUNTAGENT_OPEN_SERVER=<name>` opens an SSH tab to that server of the selected project;
+///   `MOUNTAGENT_EDIT_SERVER=<name>` opens its editor (a new server for an unknown name).
+/// - `MOUNTAGENT_SHOW_SWITCHER=<query>` opens the ⌘K switcher with that query;
+///   `MOUNTAGENT_DRAFT=<text>` puts text in the selected session's composer.
 /// - `MOUNTAGENT_SETUP_DEMO="command"` runs a command in the setup sheet
 ///   (`MOUNTAGENT_SETUP_DEMO_SIGNIN` with the sign-in bar).
 ///
@@ -49,8 +53,8 @@ enum DebugHooks {
                         case (.pending, "allow"): model.answer(.allow, item: item.id, in: session.id)
                         case (.pending, "always"): model.answer(.allowAlways, item: item.id, in: session.id)
                         case (.pending, "deny"): model.answer(.deny, item: item.id, in: session.id)
-                        case (.blocked, "retry"): model.retryBlocked(item: item.id, in: session.id, always: false)
-                        case (.blocked, "retry-always"): model.retryBlocked(item: item.id, in: session.id, always: true)
+                        case (.blocked, "retry"): model.retryBlocked(item: item.id, in: session.id, always: false, confirmsFullAccess: false)
+                        case (.blocked, "retry-always"): model.retryBlocked(item: item.id, in: session.id, always: true, confirmsFullAccess: false)
                         default: continue
                         }
                         return
@@ -112,6 +116,29 @@ enum DebugHooks {
                         window.makeKeyAndOrderFront(nil)
                         debugWindows.append(window)
                     }
+                }
+            }
+        }
+        if let name = environment["MOUNTAGENT_OPEN_SERVER"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                MainActor.assumeIsolated {
+                    guard let model = model(), let project = model.project(model.selectedSession?.projectID),
+                          let server = model.servers(of: project).first(where: { $0.name == name || $0.handle == name })
+                    else { return }
+                    ServerTerminals.shared.open(model.login(for: server), in: project.id)
+                }
+            }
+        }
+        if let name = environment["MOUNTAGENT_EDIT_SERVER"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                MainActor.assumeIsolated {
+                    guard let model = model() else { return }
+                    let server = model.servers.first { $0.name == name } ?? Server(name: "", host: "")
+                    let window = NSWindow(contentRect: NSRect(x: 200, y: 120, width: 540, height: 680), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+                    window.title = "Server"
+                    window.contentView = NSHostingView(rootView: ServerEditor(server: server).environment(model))
+                    window.makeKeyAndOrderFront(nil)
+                    debugWindows.append(window)
                 }
             }
         }
@@ -179,6 +206,15 @@ enum DebugHooks {
                     let recent = model.sessions.values.sorted { $0.updatedAt > $1.updatedAt }.map(\.id)
                     for (index, id) in recent.prefix(layout.paneCount).enumerated() { model.open(id, inPane: index) }
                     if let focus = environment["MOUNTAGENT_FOCUS_PANE"].flatMap(Int.init) { model.focusPane(focus) }
+                }
+            }
+        }
+        if environment["MOUNTAGENT_SHOW_SWITCHER"] != nil || environment["MOUNTAGENT_DRAFT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                MainActor.assumeIsolated {
+                    guard let model = model() else { return }
+                    if let draft = environment["MOUNTAGENT_DRAFT"], let id = model.selectedSessionID { model.drafts[id] = draft }
+                    if environment["MOUNTAGENT_SHOW_SWITCHER"] != nil { model.showsSwitcher = true }
                 }
             }
         }

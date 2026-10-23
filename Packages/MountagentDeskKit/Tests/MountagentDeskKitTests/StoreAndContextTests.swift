@@ -25,7 +25,7 @@ private func temporaryDirectory() throws -> URL {
     }
 
     @Test func roundTripsProjectsAndSessions() throws {
-        let store = ProjectStore(root: try temporaryDirectory())
+        let store = ProjectStore(root: try temporaryDirectory(), trashesDeleted: false)
         let project = Project(name: "Demo", path: "/tmp/demo")
         try store.saveProjects([project])
         #expect(try store.loadProjects() == [project])
@@ -45,6 +45,32 @@ private func temporaryDirectory() throws -> URL {
 
         try store.delete(newer)
         #expect(store.loadSessions(of: project.id).count == 1)
+    }
+
+    @Test func setsDamagedFilesAside() throws {
+        let root = try temporaryDirectory()
+        let store = ProjectStore(root: root, trashesDeleted: false)
+        let project = Project(name: "p", path: "/tmp")
+        var session = ChatSession(projectID: project.id, agent: .claude)
+        session.items = [ChatItem(kind: .user, text: "hi"), ChatItem(kind: .notice, text: "kept")]
+        try store.save(session)
+        let folder = root.appendingPathComponent("sessions/\(project.id.uuidString)")
+
+        // A row of a kind this version doesn't know drops alone.
+        let file = folder.appendingPathComponent("\(session.id.uuidString).json")
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        var items = json["items"] as! [[String: Any]]
+        items[0]["kind"] = "fromTheFuture"
+        json["items"] = items
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+        #expect(store.loadSessions(of: project.id).first?.items.map(\.text) == ["kept"])
+
+        // A file that doesn't decode at all is moved aside and reported.
+        try Data("{ not json".utf8).write(to: folder.appendingPathComponent("\(UUID().uuidString).json"))
+        let result = store.loadSessionsSettingAsideDamage(of: project.id)
+        #expect(result.sessions.count == 1 && result.setAside.count == 1)
+        #expect(result.setAside.first?.pathExtension.hasPrefix("corrupt-") == true)
+        #expect(store.loadSessionsSettingAsideDamage(of: project.id).setAside.isEmpty)
     }
 }
 

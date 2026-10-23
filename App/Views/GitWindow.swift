@@ -31,6 +31,10 @@ final class GitRepoModel {
     private var webURLRoot: String?
 
     var historyBranch: String?
+    /// Committers whose commits History shows (emails); empty shows everyone's.
+    var authorFilter: Set<String> = []
+    /// Who committed on the history branch, for the filter.
+    private(set) var authors: [GitLog.Author] = []
     private(set) var history: [GitLog.Commit] = []
     var selectedCommit: GitLog.Commit?
     /// Commits picked with ⌘- or ⇧-click, by SHA. With one or none, `selectedCommit` is the selection.
@@ -55,27 +59,33 @@ final class GitRepoModel {
         selectedSHAs = []
         anchorSHA = nil
         historyBranch = nil
+        authorFilter = []
+        authors = []
         history = []
     }
 
-    func refresh() async {
+    /// `polling`: the every-few-seconds look, which skips the author list (a shortlog over
+    /// thousands of commits) and leaves unchanged values alone, so the lists don't redraw.
+    func refresh(polling: Bool = false) async {
         let client = client
         let branchFilter = historyBranch ?? "HEAD"
-        let (status, branches, stashes, history, backup) = await Task.detached {
+        let authorEmails = authorFilter.sorted()
+        let (status, branches, stashes, history, backup, authors) = await Task.detached {
             let status = client.status()
-            return (status, client.branches(), client.stashes(), GitLog.commits(in: client.root, branch: branchFilter, limit: 300),
-                    status?.branch.flatMap(client.squashBackup(for:)))
+            return (status, client.branches(), client.stashes(), GitLog.commits(in: client.root, branch: branchFilter, limit: 300, authors: authorEmails),
+                    status?.branch.flatMap(client.squashBackup(for:)), polling ? nil : GitLog.authors(in: client.root, branch: branchFilter))
         }.value
+        if let authors, self.authors != authors { self.authors = authors }
         squashBackup = backup
         if webURLRoot != root {
             let url = URL(fileURLWithPath: root)
             webURL = await Task.detached { GitRepository(root: url).identity().remoteURL.flatMap(GitRepository.webURL(fromRemote:)) }.value
             webURLRoot = root
         }
-        self.status = status
-        self.branches = branches
-        self.stashes = stashes
-        self.history = history
+        if self.status != status { self.status = status }
+        if self.branches != branches { self.branches = branches }
+        if self.stashes != stashes { self.stashes = stashes }
+        if self.history != history { self.history = history }
         excluded = excluded.filter { path in status?.files.contains { $0.path == path } ?? false }
         if let selectedFile, !(status?.files.contains { $0.path == selectedFile } ?? false) { self.selectedFile = nil }
         if selectedFile == nil { selectedFile = status?.files.first?.path }
@@ -243,12 +253,13 @@ struct GitWorkspace: View {
             }
         }
         .background(Theme.background)
-        .task(id: "\(repo.root)|\(repo.historyBranch ?? "HEAD")|\(model.branches.revision(of: repo.root))") { await repo.refresh() }
+        .task(id: "\(repo.root)|\(repo.historyBranch ?? "HEAD")|\(repo.authorFilter.sorted())|\(model.branches.revision(of: repo.root))") { await repo.refresh() }
         .task(id: repo.root) {
             // Working-tree edits don't touch .git, so look again every few seconds.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(4))
-                if repo.busy == nil { await repo.refresh() }
+                // Only while the app is in use: git status on a large checkout is costly.
+                if repo.busy == nil, NSApp.isActive { await repo.refresh(polling: true) }
             }
         }
         .onChange(of: repo.root) {
@@ -456,9 +467,13 @@ struct GitWorkspace: View {
 
     #if DEBUG
     /// `MOUNTAGENT_SELECT_COMMITS=1-3` selects those history rows (0 is newest);
-    /// `MOUNTAGENT_OPEN_SQUASH` then opens the squash sheet. For snapshots.
+    /// `MOUNTAGENT_OPEN_SQUASH` then opens the squash sheet; `MOUNTAGENT_HISTORY_AUTHORS=a@x,b@y`
+    /// filters History to those committers. For snapshots.
     private func debugSelection() async {
         let environment = ProcessInfo.processInfo.environment
+        if let emails = environment["MOUNTAGENT_HISTORY_AUTHORS"] {
+            repo.authorFilter = Set(emails.split(separator: ",").map(String.init))
+        }
         guard let spec = environment["MOUNTAGENT_SELECT_COMMITS"] else { return }
         let bounds = spec.split(separator: "-").compactMap { Int($0) }
         guard bounds.count == 2 else { return }
@@ -1256,6 +1271,7 @@ private struct CommitList: View {
                     }
                 }
                 .labelsHidden()
+                AuthorFilter(repo: repo)
             }
             .padding(.horizontal, 10)
             .frame(height: 34)
@@ -1263,6 +1279,17 @@ private struct CommitList: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    if repo.history.isEmpty, !repo.authorFilter.isEmpty {
+                        VStack(spacing: 8) {
+                            Text("No commits by the people you picked on this branch.")
+                                .font(Theme.Font.ui)
+                                .foregroundStyle(Theme.textSecondary)
+                            Button("Show Everyone") { repo.authorFilter = [] }
+                                .controlSize(.small)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                    }
                     ForEach(repo.history) { commit in
                         CommitRow(commit: commit, selected: repo.isSelected(commit), account: model.gitAccounts.first { $0.email == commit.email }, webURL: repo.webURL)
                             .onTapGesture {
@@ -1375,11 +1402,131 @@ private struct CommitList: View {
     }
 }
 
+/// Who History shows: everyone, or the people ticked in a popover (several at once).
+private struct AuthorFilter: View {
+    @Environment(AppModel.self) private var model
+    @Bindable var repo: GitRepoModel
+    @State private var showing = false
+    @State private var search = ""
+
+    private var picked: [GitLog.Author] {
+        repo.authors.filter { repo.authorFilter.contains($0.email) }
+    }
+
+    var body: some View {
+        let count = repo.authorFilter.count
+        Button { showing.toggle() } label: {
+            HStack(spacing: 5) {
+                if count == 0 {
+                    Image(systemName: "person.2").font(.system(size: 11))
+                    Text("Everyone")
+                } else {
+                    HStack(spacing: -5) {
+                        ForEach(picked.prefix(3)) { author in
+                            avatar(author, size: 16)
+                        }
+                    }
+                    // Picked people may have no commits on the branch shown now.
+                    Text(count == 1 ? picked.first?.name ?? "1 person" : "\(count) people")
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold)).foregroundStyle(Theme.textTertiary)
+            }
+            .font(Theme.Font.ui)
+            .foregroundStyle(count == 0 ? Theme.textSecondary : Theme.textPrimary)
+            .padding(.horizontal, 7)
+            .frame(height: 22)
+            .background(count == 0 ? Color.clear : Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+            .hoverHighlight(cornerRadius: Theme.Radius.chip)
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .help("Show the commits of the people you pick")
+        .popover(isPresented: $showing, arrowEdge: .bottom) { list }
+    }
+
+    private var list: some View {
+        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let shown = query.isEmpty ? repo.authors : repo.authors.filter { $0.name.lowercased().contains(query) || $0.email.lowercased().contains(query) }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(Theme.textTertiary)
+                TextField("Find a person", text: $search).textFieldStyle(.plain)
+                if !repo.authorFilter.isEmpty {
+                    Button("Everyone") { repo.authorFilter = [] }
+                        .controlSize(.small)
+                        .help("Show everyone's commits")
+                }
+            }
+            .font(Theme.Font.ui)
+            .padding(10)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown) { author in
+                        row(author)
+                    }
+                    if shown.isEmpty {
+                        Text("No one matches.")
+                            .font(Theme.Font.ui)
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(10)
+                    }
+                }
+                .padding(4)
+            }
+            // A popover gives a scroll view no height of its own; size it to the rows.
+            .frame(height: min(max(CGFloat(shown.count) * 36 + 8, 50), 360))
+        }
+        .frame(width: 320)
+    }
+
+    private func row(_ author: GitLog.Author) -> some View {
+        let on = repo.authorFilter.contains(author.email)
+        return Button {
+            if on { repo.authorFilter.remove(author.email) } else { repo.authorFilter.insert(author.email) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13))
+                    .foregroundStyle(on ? Theme.accent : Theme.textTertiary)
+                avatar(author, size: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(author.name).font(Theme.Font.uiMedium).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Text(author.email).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 6)
+                Text("\(author.commits)")
+                    .font(Theme.Font.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 36)
+            .contentShape(Rectangle())
+            .hoverHighlight()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func avatar(_ author: GitLog.Author, size: CGFloat) -> some View {
+        let account = model.gitAccounts.first { $0.email.caseInsensitiveCompare(author.email) == .orderedSame }
+        return GitAccountAvatar(account: account ?? GitAccount(label: author.name, name: author.name, email: author.email, sshKeyPath: nil), size: size)
+    }
+}
+
 private struct CommitRow: View {
     let commit: GitLog.Commit
     let selected: Bool
     let account: GitAccount?
     var webURL: URL?
+
+    /// "21 Oct, 14:05"; the year only when it isn't this one.
+    static func dateText(_ date: Date) -> String {
+        let sameYear = Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
+        let day = sameYear ? date.formatted(.dateTime.day().month(.abbreviated)) : date.formatted(.dateTime.day().month(.abbreviated).year())
+        return day + ", " + date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
 
     var body: some View {
         let references = commit.references
@@ -1389,10 +1536,11 @@ private struct CommitRow: View {
                 .lineLimit(1)
             HStack(spacing: 6) {
                 GitAccountAvatar(account: account ?? GitAccount(label: commit.author, name: commit.author, email: commit.email, sshKeyPath: nil), size: 16)
-                Text("\(commit.author) · \(commit.date.formatted(.relative(presentation: .named)))")
+                Text("\(commit.author) · \(commit.date.formatted(.relative(presentation: .named))) · \(Self.dateText(commit.date))")
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
+                    .help(commit.date.formatted(date: .complete, time: .standard))
                 Spacer(minLength: 4)
                 if let number = references.pullRequest {
                     ReferenceChip(title: "#\(number)", symbol: "arrow.triangle.pull", tint: Theme.action,

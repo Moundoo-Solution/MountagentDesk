@@ -12,6 +12,8 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
     public var loadsAdditionalRules: Bool
     /// The git account written into this project's repositories, if one was chosen.
     public var gitAccountID: UUID?
+    /// Servers this project deploys to; their terminals open in its Servers panel.
+    public var serverIDs: [UUID] = []
     public var createdAt: Date
     public var defaultAgent: AgentKind
 
@@ -42,6 +44,7 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
         additionalPaths = try container.decodeIfPresent([String].self, forKey: .additionalPaths) ?? []
         loadsAdditionalRules = try container.decodeIfPresent(Bool.self, forKey: .loadsAdditionalRules) ?? false
         gitAccountID = try container.decodeIfPresent(UUID.self, forKey: .gitAccountID)
+        serverIDs = try container.decodeIfPresent([UUID].self, forKey: .serverIDs) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         defaultAgent = try container.decode(AgentKind.self, forKey: .defaultAgent)
     }

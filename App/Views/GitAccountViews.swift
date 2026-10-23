@@ -308,23 +308,18 @@ struct GitAccountEditor: View {
     }
 }
 
-/// A git account's face: the GitHub avatar when the account is connected, otherwise its
-/// initials on a color picked from the email, so accounts are easy to tell apart.
+/// A git account's or commit author's face: the GitHub avatar of the connected account, else
+/// the one GitHub shows for the email (its photo, or GitHub's pattern for that address).
+/// Initials on a color picked from the email stand in while it loads or offline.
 struct GitAccountAvatar: View {
     let account: GitAccount?
     var size: CGFloat = 20
+    @State private var image: NSImage?
 
     var body: some View {
         Group {
-            if let login = account?.githubLogin,
-               let url = URL(string: "https://github.com/\(login).png?size=\(Int(size * 3))") {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        initials
-                    }
-                }
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
             } else {
                 initials
             }
@@ -333,6 +328,22 @@ struct GitAccountAvatar: View {
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Theme.hairline))
         .help(account.map { "\($0.label) · \($0.email)" } ?? "Global git config")
+        .task(id: url) {
+            image = nil
+            guard let url else { return }
+            image = await AvatarCache.shared.image(for: url)
+        }
+    }
+
+    private var url: URL? {
+        let pixels = Int(size * 3)
+        if let login = account?.githubLogin {
+            return URL(string: "https://github.com/\(login).png?size=\(pixels)")
+        }
+        guard let email = account?.email.trimmingCharacters(in: .whitespaces).lowercased(), email.contains("@"),
+              let encoded = email.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "@._-")))
+        else { return nil }
+        return URL(string: "https://avatars.githubusercontent.com/u/e?email=\(encoded)&s=\(pixels)")
     }
 
     private var initials: some View {
@@ -349,5 +360,30 @@ struct GitAccountAvatar: View {
     private var color: Color {
         guard let email = account?.email else { return Theme.textTertiary }
         return Theme.hue(for: email)
+    }
+}
+
+/// Avatars fetched this run, so History rows scrolling back into view don't load (and
+/// flash initials) again. A failed fetch is remembered too.
+@MainActor
+final class AvatarCache {
+    static let shared = AvatarCache()
+    private var images: [URL: NSImage?] = [:]
+    private var loading: [URL: Task<NSImage?, Never>] = [:]
+
+    func image(for url: URL) async -> NSImage? {
+        if let cached = images[url] { return cached }
+        if let task = loading[url] { return await task.value }
+        let task = Task<NSImage?, Never> {
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200
+            else { return nil }
+            return NSImage(data: data)
+        }
+        loading[url] = task
+        let image = await task.value
+        loading[url] = nil
+        images[url] = .some(image)
+        return image
     }
 }

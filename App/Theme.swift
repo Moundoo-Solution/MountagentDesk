@@ -13,13 +13,25 @@ enum Theme {
         static let inkLight: UInt32 = 0x141414
         static let inkDark: UInt32 = 0xF0F0F0
         static let backgroundLight: UInt32 = 0xFCFCFC
-        static let backgroundDark: UInt32 = 0x181818
+        static let backgroundBlack: UInt32 = 0x181818
+        static let backgroundDim: UInt32 = 0x2A2B2F
         /// Sidebar, chrome, code blocks and terminals.
         static let sidebarLight: UInt32 = 0xF3F3F3
-        static let sidebarDark: UInt32 = 0x141414
+        static let sidebarBlack: UInt32 = 0x141414
+        static let sidebarDim: UInt32 = 0x232428
+
+        /// The dark surfaces of the current shade (Dark or Dim).
+        static var backgroundDark: UInt32 { darkShade == .dim ? backgroundDim : backgroundBlack }
+        static var sidebarDark: UInt32 { darkShade == .dim ? sidebarDim : sidebarBlack }
         static let accentLight: UInt32 = 0x2778C1
         static let accentDark: UInt32 = 0x81A1C1
     }
+
+    /// How deep the dark appearance's surfaces are: Dark's near-black or Dim's grey.
+    enum DarkShade { case black, dim }
+
+    /// Read whenever a surface color is drawn; `Appearance.apply()` sets it.
+    nonisolated(unsafe) static var darkShade: DarkShade = Appearance.current == .dim ? .dim : .black
 
     /// The ink at an opacity: every text, fill and stroke level is one of these.
     static func ink(_ opacity: CGFloat) -> Color {
@@ -31,11 +43,11 @@ enum Theme {
     }
 
     // Surfaces (opaque)
-    static let background = Color(light: Hex.backgroundLight, dark: Hex.backgroundDark)   // conversation
-    static let sidebar = Color(light: Hex.sidebarLight, dark: Hex.sidebarDark)            // sidebar and chrome
-    static let elevated = Color(light: 0xFFFFFF, dark: 0x1F1F1F)     // composer, cards
-    static let surface = Color(light: 0xF6F6F6, dark: 0x1D1D1D)      // expanded tool output
-    static let codeBackground = Color(light: Hex.sidebarLight, dark: Hex.sidebarDark)
+    static let background = Color(nsColor: .surface(light: Hex.backgroundLight, dark: Hex.backgroundBlack, dim: Hex.backgroundDim))   // conversation
+    static let sidebar = Color(nsColor: .surface(light: Hex.sidebarLight, dark: Hex.sidebarBlack, dim: Hex.sidebarDim))               // sidebar and chrome
+    static let elevated = Color(nsColor: .surface(light: 0xFFFFFF, dark: 0x1F1F1F, dim: 0x333439))     // composer, cards
+    static let surface = Color(nsColor: .surface(light: 0xF6F6F6, dark: 0x1D1D1D, dim: 0x2F3035))      // expanded tool output
+    static let codeBackground = Color(nsColor: .surface(light: Hex.sidebarLight, dark: Hex.sidebarBlack, dim: Hex.sidebarDim))
 
     // Fills and strokes (ink at Cursor's levels)
     static let userFill = ink(0.04)
@@ -97,9 +109,18 @@ enum Theme {
     static let cursor = Color(light: 0x5A6B8C, dark: 0x9AA8C7)
     static let codex = Color(light: 0x0E8A6A, dark: 0x3CC79F)
     static let antigravity = Color(light: 0x6B4FD8, dark: 0xA28BFF)
+    static let copilot = Color(light: 0xBF3989, dark: 0xDB61A2)
 
     // Layout
+    /// Frame interval of the "working" animations: 30 fps looks the same as the display's
+    /// 120 and costs a quarter of the redraws while agents run.
+    static let animationInterval: Double = 1.0 / 30
     static let columnWidth: CGFloat = 760
+
+    /// The chat column's width limit, padding included: none with Full-Width Chat on.
+    static func chatMaxWidth(fullWidth: Bool) -> CGFloat {
+        fullWidth ? .infinity : columnWidth + 48
+    }
     static let chromeHeight: CGFloat = 40
     static let turnSpacing: CGFloat = 20
     static let itemSpacing: CGFloat = 10
@@ -143,6 +164,14 @@ extension NSColor {
         NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light }
     }
 
+    /// A surface: light, or dark in the current shade (Dark's near-black or Dim's grey).
+    static func surface(light: UInt32, dark: UInt32, dim: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
+            guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else { return NSColor(hex: light) }
+            return NSColor(hex: Theme.darkShade == .dim ? dim : dark)
+        }
+    }
+
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(
             srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -158,13 +187,37 @@ extension Project {
     var tint: Color { Theme.hue(for: name) }
 }
 
+extension ServerEnvironment {
+    /// Red for live, amber for UAT, green for test: the same signal everywhere a server shows.
+    var tint: Color {
+        switch self {
+        case .live: Theme.danger
+        case .uat: Theme.warning
+        case .test: Theme.success
+        case .dev: Theme.accent
+        }
+    }
+
+}
+
+extension Image {
+    /// An SF Symbol, or one of the app's own symbols (Copilot's mark) from the asset catalog.
+    init(symbol name: String) {
+        self = Image.customSymbols.contains(name) ? Image(name) : Image(systemName: name)
+    }
+
+    static let customSymbols: Set<String> = ["copilot"]
+}
+
 extension AgentKind {
+    /// An SF Symbol name, or a custom symbol's asset name; draw it with `Image(symbol:)`.
     var symbolName: String {
         switch self {
         case .claude: "sparkle"
         case .cursor: "cursorarrow.rays"
         case .codex: "hexagon"
         case .antigravity: "atom"
+        case .copilot: "copilot"
         }
     }
 
@@ -174,6 +227,7 @@ extension AgentKind {
         case .cursor: Theme.cursor
         case .codex: Theme.codex
         case .antigravity: Theme.antigravity
+        case .copilot: Theme.copilot
         }
     }
 
@@ -183,6 +237,7 @@ extension AgentKind {
         case .cursor: "Cursor"
         case .codex: "Codex"
         case .antigravity: "Antigravity"
+        case .copilot: "Copilot"
         }
     }
 }
@@ -194,6 +249,8 @@ enum Appearance: String, CaseIterable, Identifiable {
     case system
     case light
     case dark
+    /// Dark, with grey surfaces instead of near-black ones.
+    case dim
 
     static let key = "appearance"
 
@@ -204,6 +261,7 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
+        case .dim: "Dim"
         }
     }
 
@@ -212,6 +270,7 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .system: "circle.lefthalf.filled"
         case .light: "sun.max"
         case .dark: "moon"
+        case .dim: "moon.haze"
         }
     }
 
@@ -221,10 +280,21 @@ enum Appearance: String, CaseIterable, Identifiable {
 
     @MainActor
     func apply() {
-        NSApp.appearance = switch self {
+        let shade: Theme.DarkShade = self == .dim ? .dim : .black
+        let shadeChanged = Theme.darkShade != shade
+        Theme.darkShade = shade
+        let target: NSAppearance? = switch self {
         case .system: nil
         case .light: NSAppearance(named: .aqua)
-        case .dark: NSAppearance(named: .darkAqua)
+        case .dark, .dim: NSAppearance(named: .darkAqua)
+        }
+        // Dark and Dim are the same NSAppearance, so nothing would redraw; passing through
+        // light makes every surface color resolve again.
+        if shadeChanged, NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua {
+            NSApp.appearance = NSAppearance(named: .aqua)
+            DispatchQueue.main.async { NSApp.appearance = target }
+        } else {
+            NSApp.appearance = target
         }
     }
 }
@@ -277,7 +347,7 @@ struct ChipLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             if let symbol {
-                Image(systemName: symbol)
+                Image(symbol: symbol)
                     .font(.system(size: 11))
                     .foregroundStyle(tint ?? Theme.textSecondary)
             }
@@ -303,6 +373,87 @@ struct ChipLabel: View {
 }
 
 /// A 24pt icon button for chrome bars, Cursor style: secondary icon, fill on hover.
+/// Color schemes for the terminals (Terminal panel, server tabs, setup sheet), picked in
+/// Settings → Appearance. Mountagent follows the app's light or dark look; the others are
+/// always dark, as in Termius.
+enum TerminalTheme: String, CaseIterable, Identifiable {
+    case app, hackerBlue, dracula, solarized
+
+    static let key = "terminalTheme"
+    var id: String { rawValue }
+
+    static var current: TerminalTheme {
+        UserDefaults.standard.string(forKey: key).flatMap(TerminalTheme.init(rawValue:)) ?? .app
+    }
+
+    var title: String {
+        switch self {
+        case .app: "Mountagent"
+        case .hackerBlue: "Hacker Blue"
+        case .dracula: "Dracula"
+        case .solarized: "Solarized Dark"
+        }
+    }
+
+    struct Scheme: Equatable {
+        let background: UInt32
+        let foreground: UInt32
+        let cursor: UInt32
+        /// Black, red, green, yellow, blue, magenta, cyan, white, then their bright forms.
+        let ansi: [UInt32]
+    }
+
+    func scheme(dark: Bool) -> Scheme {
+        switch self {
+        case .app where dark:
+            Scheme(background: Theme.Hex.sidebarDark, foreground: 0xDCDFE4, cursor: Theme.Hex.inkDark, ansi: [
+                0x3F4451, 0xE06C75, 0x98C379, 0xE5C07B, 0x61AFEF, 0xC678DD, 0x56B6C2, 0xD7DAE0,
+                0x5C6370, 0xFF7A85, 0xB5E890, 0xFFD68A, 0x7CC4FF, 0xDA8EF0, 0x6FD3DF, 0xFFFFFF,
+            ])
+        case .app:
+            Scheme(background: Theme.Hex.sidebarLight, foreground: 0x2B2D33, cursor: Theme.Hex.inkLight, ansi: [
+                0x383A42, 0xD8453A, 0x3F8F3E, 0xB27A00, 0x3A6FE0, 0xA02BA0, 0x0A80AE, 0x9A9BA2,
+                0x696C77, 0xEE5D52, 0x4FA94E, 0xC98C00, 0x5585F0, 0xB73EB5, 0x1493C6, 0x55565C,
+            ])
+        case .hackerBlue:
+            Scheme(background: 0x0E1726, foreground: 0xD6E2F0, cursor: 0x3BA0FF, ansi: [
+                0x1C2738, 0xFF5370, 0x3DD68C, 0xFFCB6B, 0x3BA0FF, 0xC792EA, 0x2BD4E0, 0xC8D3E0,
+                0x4A5A73, 0xFF7A90, 0x6EF0A8, 0xFFDD8F, 0x6CB8FF, 0xDDB0F5, 0x6BE6EE, 0xFFFFFF,
+            ])
+        case .dracula:
+            Scheme(background: 0x282A36, foreground: 0xF8F8F2, cursor: 0xF8F8F2, ansi: [
+                0x21222C, 0xFF5555, 0x50FA7B, 0xF1FA8C, 0xBD93F9, 0xFF79C6, 0x8BE9FD, 0xF8F8F2,
+                0x6272A4, 0xFF6E6E, 0x69FF94, 0xFFFFA5, 0xD6ACFF, 0xFF92DF, 0xA4FFFF, 0xFFFFFF,
+            ])
+        case .solarized:
+            Scheme(background: 0x002B36, foreground: 0x93A1A1, cursor: 0x93A1A1, ansi: [
+                0x073642, 0xDC322F, 0x859900, 0xB58900, 0x268BD2, 0xD33682, 0x2AA198, 0xEEE8D5,
+                0x657B83, 0xFF6E64, 0xA6BD00, 0xD7AD00, 0x5DB0F0, 0xF0629D, 0x46C9B8, 0xFDF6E3,
+            ])
+        }
+    }
+
+    /// The terminal's background, for the area around it.
+    func background(dark: Bool) -> Color {
+        Color(nsColor: NSColor(hex: scheme(dark: dark).background))
+    }
+}
+
+/// A colored rounded square with a white glyph, as System Settings marks its panes.
+struct TintedIcon: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 22
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.5, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
+    }
+}
+
 struct ChromeButton: View {
     let symbol: String
     let help: String

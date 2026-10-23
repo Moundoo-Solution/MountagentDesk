@@ -30,6 +30,14 @@ public struct ClaudeProvider: AgentProvider {
         if let resume = request.resumeSessionID {
             args += ["--resume", resume]
         }
+        if request.linksServers {
+            // Deny rules hold even with --dangerously-skip-permissions.
+            args += ["--disallowedTools", ServerHelper.claudeDenyRules]
+        }
+        if request.readsServers {
+            // The helper checks every command itself, so it needn't ask first.
+            args += ["--allowedTools", "Bash(\(ServerHelper.commandName):*)"]
+        }
         if let title = request.sessionTitle {
             args += ["--append-system-prompt", SessionTitle.note(for: title)]
         }

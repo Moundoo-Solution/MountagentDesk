@@ -7,6 +7,8 @@ public enum AgentKind: String, Codable, CodingKeyRepresentable, CaseIterable, Id
     case codex
     /// Google's Antigravity CLI (`agy`), which replaced Gemini CLI for personal Google accounts.
     case antigravity
+    /// GitHub Copilot CLI (`copilot`), signed in with a GitHub account that has Copilot.
+    case copilot
 
     public var id: String { rawValue }
 
@@ -39,6 +41,7 @@ public enum AgentKind: String, Codable, CodingKeyRepresentable, CaseIterable, Id
         case .cursor: "Cursor"
         case .codex: "Codex"
         case .antigravity: "Antigravity"
+        case .copilot: "GitHub Copilot"
         }
     }
 
@@ -54,6 +57,7 @@ public enum AgentKind: String, Codable, CodingKeyRepresentable, CaseIterable, Id
         case .cursor: "Anysphere"
         case .codex: "OpenAI"
         case .antigravity: "Google"
+        case .copilot: "GitHub"
         }
     }
 
@@ -64,6 +68,7 @@ public enum AgentKind: String, Codable, CodingKeyRepresentable, CaseIterable, Id
         case .cursor: "cursor-agent"
         case .codex: "codex"
         case .antigravity: "agy"
+        case .copilot: "copilot"
         }
     }
 
@@ -86,6 +91,9 @@ public enum AgentKind: String, Codable, CodingKeyRepresentable, CaseIterable, Id
         case .antigravity:
             // The real list comes from `agy models` once signed in.
             [AgentModel(id: nil, name: "Default")]
+        case .copilot:
+            // The real list comes from `copilot help config`.
+            [AgentModel(id: nil, name: "Auto")]
         }
     }
 }
@@ -103,7 +111,8 @@ public struct AgentModel: Hashable, Codable, Identifiable, Sendable {
 /// How much the agent may do without asking. With `editFiles` the agent edits freely, and
 /// what happens before commands and MCP tools depends on the CLI: Claude asks in the chat;
 /// Cursor (which cannot wait when headless) reports the blocked call so it can be allowed
-/// and retried; Codex runs commands in its workspace sandbox; Antigravity refuses them.
+/// and retried; Codex runs commands in its workspace sandbox; Antigravity refuses them;
+/// Copilot runs read-only commands and reports the others so they can be allowed and retried.
 public enum AccessLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case readOnly
     case editFiles
