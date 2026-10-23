@@ -377,6 +377,52 @@ final class AppModel {
         running[sessionID] != nil || preparing.contains(sessionID) || settingUpWorktree.contains(sessionID)
     }
 
+    // MARK: Pull requests
+
+    /// The session the Create Pull Request sheet is for.
+    var pullRequestSessionID: UUID?
+    /// Each session's branch's pull request on GitHub, as last looked up.
+    private(set) var pullRequests: [UUID: GitHubCLI.PullRequest] = [:]
+
+    /// The branch a session works on: its worktree's, else the main folder's.
+    func branchName(of session: ChatSession, project: Project) -> String? {
+        session.worktreeBranch ?? branch(of: project)
+    }
+
+    /// The project's GitHub account token, so `gh` acts as that account (nil: gh's active one).
+    nonisolated private static func token(for login: String?) -> String? {
+        login.flatMap(GitHubCLI.token(for:))
+    }
+
+    func refreshPullRequest(for sessionID: UUID) {
+        guard let session = sessions[sessionID], let project = project(session.projectID),
+              let branch = branchName(of: session, project: project), !PullRequestDraft.mainBranches.contains(branch),
+              GitHubCLI.locate() != nil
+        else { return }
+        let root = workRoot(of: session, project: project), login = gitAccount(project.gitAccountID)?.githubLogin
+        Task {
+            let found = await Task.detached { GitHubCLI.pullRequest(for: branch, in: root, token: Self.token(for: login)) }.value
+            pullRequests[sessionID] = found
+        }
+    }
+
+    /// Publishes the session's branch, opens the pull request, notes it in the chat and
+    /// shows it in the browser.
+    func createPullRequest(for sessionID: UUID, title: String, body: String, base: String, draft: Bool) async throws {
+        guard let session = sessions[sessionID], let project = project(session.projectID),
+              let branch = branchName(of: session, project: project)
+        else { throw NSError(domain: "PullRequest", code: 1, userInfo: [NSLocalizedDescriptionKey: "This session isn't on a branch."]) }
+        let root = workRoot(of: session, project: project), login = gitAccount(project.gitAccountID)?.githubLogin
+        let url = try await Task.detached {
+            try GitClient(root: root).push(publishing: branch)
+            return try GitHubCLI.createPullRequest(in: root, head: branch, base: base, title: title, body: body, draft: draft, token: Self.token(for: login))
+        }.value
+        update(sessionID) { $0.items.append(ChatItem(kind: .notice, text: "Opened a pull request for \(branch): \(url.absoluteString)")) }
+        persist(sessionID)
+        refreshPullRequest(for: sessionID)
+        NSWorkspace.shared.open(url)
+    }
+
     /// Comments left on the Changes panel's diffs, per session, until they're sent.
     private(set) var reviewComments: [UUID: [DiffReview.Comment]] = [:]
 

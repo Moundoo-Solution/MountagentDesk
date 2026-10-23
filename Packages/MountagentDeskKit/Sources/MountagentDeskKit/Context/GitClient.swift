@@ -252,6 +252,17 @@ public struct GitClient: Sendable {
         try write(["pull", "--no-rebase", "--no-edit"])
     }
 
+    /// The subjects of the commits on HEAD that `base` doesn't have, oldest first: against
+    /// origin's copy of it when there is one.
+    public func subjects(since base: String) -> [String] {
+        for range in ["origin/\(base)..HEAD", "\(base)..HEAD"] {
+            if let result = try? run(["log", "--reverse", "--format=%s", range], allowFailure: true), result.status == 0 {
+                return result.output.split(separator: "\n").map(String.init)
+            }
+        }
+        return []
+    }
+
     /// Pushes; a branch without an upstream is published to `origin` and tracks it.
     public func push(publishing branch: String? = nil) throws {
         if let branch {

@@ -18,6 +18,7 @@ import SwiftUI
 ///   the window forward with the composer focused.
 ///
 /// Opening things to look at:
+/// - `MOUNTAGENT_SHOW_PULL_REQUEST` selects a worktree session and opens Create Pull Request for it.
 /// - `MOUNTAGENT_LAYOUT=single|columns|rows|grid` splits the chat area (filled with recent
 ///   sessions), `MOUNTAGENT_FOCUS_PANE=n` focuses a pane.
 /// - `MOUNTAGENT_SHOW_SETTINGS=<pane>`, `MOUNTAGENT_SHOW_FOLDERS`, `MOUNTAGENT_SHOW_GIT`
@@ -210,13 +211,19 @@ enum DebugHooks {
                 }
             }
         }
-        if environment["MOUNTAGENT_SHOW_SWITCHER"] != nil || environment["MOUNTAGENT_DRAFT"] != nil || environment["MOUNTAGENT_SHOW_QUICK_LAUNCH"] != nil {
+        if environment["MOUNTAGENT_SHOW_SWITCHER"] != nil || environment["MOUNTAGENT_DRAFT"] != nil || environment["MOUNTAGENT_SHOW_QUICK_LAUNCH"] != nil
+            || environment["MOUNTAGENT_SHOW_PULL_REQUEST"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 MainActor.assumeIsolated {
                     guard let model = model() else { return }
                     if let draft = environment["MOUNTAGENT_DRAFT"], let id = model.selectedSessionID { model.drafts[id] = draft }
                     if environment["MOUNTAGENT_SHOW_SWITCHER"] != nil { model.showsSwitcher = true }
                     if environment["MOUNTAGENT_SHOW_QUICK_LAUNCH"] != nil { model.showsQuickLaunch = true }
+                    if environment["MOUNTAGENT_SHOW_PULL_REQUEST"] != nil {
+                        let target = model.sessions.values.first { $0.worktree != nil }?.id ?? model.selectedSessionID
+                        model.selectedSessionID = target
+                        model.pullRequestSessionID = target
+                    }
                 }
             }
         }

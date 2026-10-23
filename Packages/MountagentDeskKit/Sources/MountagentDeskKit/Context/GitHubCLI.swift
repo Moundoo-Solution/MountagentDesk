@@ -98,12 +98,67 @@ public enum GitHubCLI {
         return value?.isEmpty == false ? value : nil
     }
 
+    // MARK: Pull requests
+
+    public struct PullRequest: Equatable, Sendable {
+        public var number: Int
+        public var url: URL
+        /// OPEN, MERGED or CLOSED.
+        public var state: String
+        public var isDraft: Bool
+    }
+
+    /// The repository's default branch on GitHub (what a pull request merges into).
+    public static func defaultBranch(in repository: URL, token: String? = nil) -> String? {
+        let name = (try? run(["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], token: token, in: repository))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name?.isEmpty == false ? name : nil
+    }
+
+    /// The pull request opened from `branch`, if there is one.
+    public static func pullRequest(for branch: String, in repository: URL, token: String? = nil) -> PullRequest? {
+        guard let json = try? run(["pr", "view", branch, "--json", "number,url,state,isDraft"], token: token, in: repository) else { return nil }
+        return parsePullRequest(json)
+    }
+
+    static func parsePullRequest(_ json: String) -> PullRequest? {
+        guard let object = JSONLine.object(jsonPart(json)), let number = object["number"] as? Int,
+              let link = object["url"] as? String, let url = URL(string: link)
+        else { return nil }
+        return PullRequest(number: number, url: url, state: object["state"] as? String ?? "OPEN", isDraft: object["isDraft"] as? Bool ?? false)
+    }
+
+    /// Opens a pull request from `head` (already pushed) into `base`; returns its address.
+    public static func createPullRequest(in repository: URL, head: String, base: String, title: String, body: String,
+                                         draft: Bool, token: String? = nil) throws -> URL {
+        var arguments = ["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body]
+        if draft { arguments.append("--draft") }
+        let output = try run(arguments, token: token, in: repository)
+        guard let url = pullRequestURL(in: output) else {
+            throw GitClient.Failure(message: output.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return url
+    }
+
+    /// `gh pr create` prints the new pull request's address last.
+    static func pullRequestURL(in output: String) -> URL? {
+        output.split(whereSeparator: \.isNewline).reversed()
+            .first { $0.hasPrefix("https://") && $0.contains("/pull/") }
+            .flatMap { URL(string: $0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    private static func jsonPart(_ text: String) -> String {
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") else { return text }
+        return String(text[start...end])
+    }
+
     @discardableResult
-    private static func run(_ arguments: [String], token: String? = nil) throws -> String {
+    private static func run(_ arguments: [String], token: String? = nil, in directory: URL? = nil) throws -> String {
         guard let gh = locate() else { throw GitClient.Failure(message: "The GitHub CLI (gh) isn't installed.") }
         let process = Process()
         process.executableURL = gh
         process.arguments = arguments
+        if let directory { process.currentDirectoryURL = directory }
         var environment = ExecutableLocator.environment
         environment["GH_PROMPT_DISABLED"] = "1"
         environment["NO_COLOR"] = "1"

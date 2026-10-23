@@ -32,6 +32,9 @@ struct ContentView: View {
         .sheet(item: model.setupBinding(for: .main)) { SetupSheet(task: $0) }
         .sheet(isPresented: Binding(get: { model.showsSwitcher }, set: { model.showsSwitcher = $0 })) { SessionSwitcher() }
         .sheet(isPresented: Binding(get: { model.showsQuickLaunch }, set: { model.showsQuickLaunch = $0 })) { QuickLaunch() }
+        .sheet(isPresented: Binding(get: { model.pullRequestSessionID != nil }, set: { if !$0 { model.pullRequestSessionID = nil } })) {
+            if let id = model.pullRequestSessionID { PullRequestSheet(sessionID: id) }
+        }
         .alert("Mountagent Desk", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

@@ -90,6 +90,8 @@ struct ChatView: View {
                         .padding(.leading, 6)
                     BranchChip(session: session, project: project)
                         .padding(.leading, 8)
+                    PullRequestChip(session: session, project: project)
+                        .padding(.leading, 4)
                 }
             }
             Spacer(minLength: 12)
