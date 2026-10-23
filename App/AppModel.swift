@@ -1672,6 +1672,15 @@ final class AppModel {
             for kind in agents {
                 found[kind] = probe.probe(kind)
             }
+            #if DEBUG
+            // Screenshots: no real sign-ins on show.
+            if ProcessInfo.processInfo.environment["MOUNTAGENT_DEMO_IDENTITY"] != nil {
+                for kind in found.keys where found[kind]?.email != nil {
+                    found[kind]?.email = "alex@example.com"
+                    found[kind]?.organization = nil
+                }
+            }
+            #endif
             await MainActor.run {
                 self.accounts = found
                 self.checkingAccounts = false

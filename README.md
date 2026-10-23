@@ -35,11 +35,19 @@
     <td valign="top"><h3>🖥️ Servers, read-only for agents</h3><img src=".github/assets/servers.png" alt="Servers with agent read access" /></td>
     <td valign="top"><h3>🔀 Git built in</h3><img src=".github/assets/git.png" alt="The Git workspace" /></td>
   </tr>
+  <tr>
+    <td valign="top"><h3>🖥️ Any CLI as a session</h3><img src=".github/assets/terminal.png" alt="A terminal session running a command in the project" /></td>
+    <td valign="top"><h3>⚡ ⌘T into a branch</h3><img src=".github/assets/launch.png" alt="Quick Launch: agent, branch and first message" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><h3>💵 Cost at API prices</h3><img src=".github/assets/cost.png" alt="What the agents' own logs add up to at API prices" /></td>
+    <td valign="top"><h3>📊 Plan limits, live</h3><img src=".github/assets/usage.png" alt="Account and usage for each agent" /></td>
+  </tr>
 </table>
 
 <p align="center">
-  ✋ Approve commands &nbsp;·&nbsp; ⏳ Queue messages &nbsp;·&nbsp; 💵 Cost per project<br />
-  🗂️ Archive &amp; export &nbsp;·&nbsp; 💾 Backup &amp; restore &nbsp;·&nbsp; 🎙️ Dictation
+  ✋ Approve commands &nbsp;·&nbsp; ⏳ Queue messages &nbsp;·&nbsp; 🟢 What each agent is doing<br />
+  ✳️ Dirty-branch marker &nbsp;·&nbsp; 🗂️ Archive &amp; export &nbsp;·&nbsp; 💾 Backup &amp; restore &nbsp;·&nbsp; 🎙️ Dictation
 </p>
 
 <a id="build"></a>
