@@ -135,6 +135,51 @@ struct PaneResizeHandle: View {
     }
 }
 
+/// The line above a bottom section; dragging it changes the section's height.
+struct HeightResizeHandle: View {
+    @Binding var height: Double
+    var range: ClosedRange<Double> = 120...700
+    var defaultHeight: Double?
+    @State private var start: Double?
+    @State private var hovering = false
+
+    private var active: Bool { hovering || start != nil }
+
+    var body: some View {
+        Rectangle()
+            .fill(active ? Theme.accent : Theme.hairline)
+            .frame(height: active ? 2 : 1)
+            .frame(height: 1)
+            .overlay {
+                Color.clear
+                    .frame(height: 10)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        hovering = inside
+                        if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let base = start ?? min(range.upperBound, max(range.lowerBound, height))
+                                if start == nil { start = base }
+                                // The handle sits on top: dragging up makes the section taller.
+                                height = min(range.upperBound, max(range.lowerBound, base - value.translation.height))
+                            }
+                            .onEnded { _ in start = nil }
+                    )
+                    .onTapGesture(count: 2) {
+                        if let defaultHeight {
+                            withAnimation(.snappy(duration: 0.2)) { height = defaultHeight }
+                        }
+                    }
+            }
+            .animation(.easeOut(duration: 0.12), value: active)
+            .zIndex(1)
+            .help("Drag to resize · double-click to reset")
+    }
+}
+
 private struct WelcomeView: View {
     @Environment(AppModel.self) private var model
 

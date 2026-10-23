@@ -48,7 +48,6 @@ struct SidebarView: View {
             }
             .scrollIndicators(.never)
 
-            AccountUsageSection()
             SidebarFooter()
         }
         .background(Theme.sidebar)
@@ -476,8 +475,8 @@ private struct WorkingSpinner: View {
 }
 
 /// Each enabled agent's account and plan usage at a glance, as in Claude Code's own panel.
-/// Collapsible; "View details" opens Settings → Agents.
-private struct AccountUsageSection: View {
+/// Collapsible; "View details" opens Settings → Agents. At the foot of the right panel.
+struct AccountUsageSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
     @AppStorage("accountUsageExpanded") private var expanded = true
@@ -521,7 +520,6 @@ private struct AccountUsageSection: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
 
     @ViewBuilder

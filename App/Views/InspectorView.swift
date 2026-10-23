@@ -9,6 +9,8 @@ struct InspectorView: View {
     let project: Project
     let sessionID: UUID
     @AppStorage("inspectorTool") private var toolStore = ""
+    @AppStorage("accountUsageExpanded") private var usageExpanded = true
+    @AppStorage("accountUsageHeight") private var usageHeight = 320.0
     @State private var changes = ChangesState()
 
     enum Tool: String, CaseIterable {
@@ -49,21 +51,24 @@ struct InspectorView: View {
     private var tool: Tool? { Tool(rawValue: toolStore) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let tool {
-                header(tool)
-                Group {
-                    switch tool {
-                    case .changes: ChangesPanel(project: project, state: changes)
-                    case .git: GitPanel(project: project)
-                    case .terminal: TerminalPanel(project: project)
-                    case .servers: ServersPanel(project: project)
-                    case .files: FilesPanel(project: project)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                if let tool {
+                    header(tool)
+                    Group {
+                        switch tool {
+                        case .changes: ChangesPanel(project: project, state: changes)
+                        case .git: GitPanel(project: project)
+                        case .terminal: TerminalPanel(project: project)
+                        case .servers: ServersPanel(project: project)
+                        case .files: FilesPanel(project: project)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    home
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                home
+                usage(in: geometry.size.height)
             }
         }
         .background(Theme.sidebar)
@@ -71,6 +76,24 @@ struct InspectorView: View {
         .onChange(of: model.isRunning(sessionID)) { _, running in
             // Agents change files; refresh when a turn ends.
             if !running { Task { await changes.refresh(project) } }
+        }
+    }
+
+    /// Account & Usage at the foot, as tall as the user dragged it (leaving the panel above
+    /// some room); folded, just its title row.
+    @ViewBuilder
+    private func usage(in height: Double) -> some View {
+        if usageExpanded {
+            let range = 120...max(120, height - 160)
+            HeightResizeHandle(height: $usageHeight, range: range, defaultHeight: 320)
+            ScrollView {
+                AccountUsageSection()
+            }
+            .scrollIndicators(.automatic)
+            .frame(height: min(max(usageHeight, range.lowerBound), range.upperBound))
+        } else {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            AccountUsageSection()
         }
     }
 
