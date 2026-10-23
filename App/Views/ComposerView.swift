@@ -5,6 +5,7 @@ import SwiftUI
 /// send button. A pill above it shows what the agent is doing.
 struct ComposerView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(AppSettings.fullWidthChatKey) private var fullWidthChat = true
     let session: ChatSession
     @Binding var text: String
     @State private var attachments: [String] = []
@@ -21,13 +22,31 @@ struct ComposerView: View {
     @AppStorage(AppSettings.dictationMicrophoneKey) private var dictationMicrophone = ""
 
     private var isRunning: Bool { model.isRunning(session.id) }
-    private var canSend: Bool {
-        !isRunning && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
+    private var hasContent: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty
     }
+    /// While the agent works, sending queues the message for the end of its turn.
+    private var canSend: Bool { hasContent }
+    /// The button stops the agent when there's nothing to queue.
+    private var stops: Bool { isRunning && !hasContent }
     private var project: Project? { model.project(session.projectID) }
 
     var body: some View {
         VStack(spacing: 8) {
+            if let matches = PromptTemplate.matches(for: text, in: model.promptTemplates), !matches.isEmpty {
+                TemplateSuggestions(templates: Array(matches.prefix(6))) { text = $0.text }
+                    .transition(.opacity)
+            }
+            if let waiting = model.queued[session.id] {
+                QueuedPill(text: waiting.text) {
+                    if let message = model.cancelQueued(in: session.id) {
+                        text = message.text + (text.isEmpty ? "" : "\n\n" + text)
+                        attachments = message.attachments + attachments
+                        images = message.images + images
+                    }
+                }
+                .transition(.opacity)
+            }
             if isRunning {
                 ActivityPill(session: session, waitingForApproval: model.hasPendingPermission(session.id))
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -77,7 +96,7 @@ struct ComposerView: View {
         .padding(.horizontal, 24)
         .padding(.top, 4)
         .padding(.bottom, 12)
-        .frame(maxWidth: Theme.columnWidth + 48)
+        .frame(maxWidth: Theme.chatMaxWidth(fullWidth: fullWidthChat))
         .frame(maxWidth: .infinity)
         // The transcript scrolls under this area: keep it opaque, and fade the text out
         // just above it instead of letting lines touch the box.
@@ -169,6 +188,7 @@ struct ComposerView: View {
             modelChip
             effortChip
             accessChip
+            templatesChip
 
             Spacer(minLength: 8)
             micButton
@@ -292,7 +312,7 @@ struct ComposerView: View {
             Picker("Agent", selection: Binding(get: { session.agent }, set: { model.setAgent($0, for: session.id) })) {
                 // A session may still be on an agent that has since been switched off.
                 ForEach(AgentKind.allCases.filter { model.isEnabled($0) || $0 == session.agent }) { agent in
-                    Label(agent.displayName, systemImage: agent.symbolName).tag(agent)
+                    Label { Text(agent.displayName) } icon: { Image(symbol: agent.symbolName) }.tag(agent)
                 }
             }
             .pickerStyle(.inline)
@@ -345,7 +365,7 @@ struct ComposerView: View {
             }
             .chipMenu()
             .help("Model")
-        case .codex, .antigravity:
+        case .codex, .antigravity, .copilot:
             let models = model.models(for: session.agent)
             Menu {
                 Picker("Model", selection: Binding(get: { session.model }, set: { model.setModel($0, for: session.id) })) {
@@ -357,6 +377,9 @@ struct ComposerView: View {
                 if session.agent == .codex {
                     Divider()
                     Button("Reload Codex Models") { model.refreshCodexModels() }
+                } else if session.agent == .copilot {
+                    Divider()
+                    Button("Reload Copilot Models") { model.refreshCopilotModels() }
                 }
             } label: {
                 ChipLabel(title: models.first { $0.id == session.model }?.name ?? session.model ?? models.first?.name ?? "Default")
@@ -371,7 +394,7 @@ struct ComposerView: View {
     @ViewBuilder
     private var effortChip: some View {
         switch session.agent {
-        case .claude, .codex, .antigravity:
+        case .claude, .codex, .antigravity, .copilot:
             Menu {
                 Picker("Effort", selection: Binding(get: { session.effort }, set: { model.setEffort($0, for: session.id) })) {
                     Text("Default").tag(String?.none)
@@ -441,20 +464,49 @@ struct ComposerView: View {
         .help("What the agent may do without asking")
     }
 
+    /// Kept prompts: insert one, keep the box's text as one, or drop one.
+    private var templatesChip: some View {
+        Menu {
+            ForEach(model.promptTemplates) { template in
+                Button(template.title) { insert(template) }
+            }
+            Divider()
+            Button("Save Text as Prompt…") { model.saveAsTemplate(text) }
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if !model.promptTemplates.isEmpty {
+                Menu("Delete Prompt") {
+                    ForEach(model.promptTemplates) { template in
+                        Button(template.title) { model.savePromptTemplates(model.promptTemplates.filter { $0.id != template.id }) }
+                    }
+                }
+            }
+        } label: {
+            ChipLabel(title: "Prompts", symbol: "text.badge.star")
+        }
+        .chipMenu()
+        .help("Kept prompts (or type / and part of a name)")
+    }
+
+    private func insert(_ template: PromptTemplate) {
+        let current = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        text = current.isEmpty || current.hasPrefix("/") ? template.text : text + (text.hasSuffix("\n") ? "" : "\n\n") + template.text
+        focused = true
+    }
+
     private var sendButton: some View {
         Button {
-            if isRunning { model.stop(session.id) } else { send() }
+            if stops { model.stop(session.id) } else { send() }
         } label: {
-            Image(systemName: isRunning ? "stop.fill" : "arrow.up")
-                .font(.system(size: isRunning ? 10 : 13, weight: .bold))
+            Image(systemName: stops ? "stop.fill" : isRunning ? "text.append" : "arrow.up")
+                .font(.system(size: stops ? 10 : 13, weight: .bold))
                 .foregroundStyle(canSend || isRunning ? Theme.background : Theme.textTertiary)
                 .frame(width: 24, height: 24)
-                .background(isRunning ? Theme.textPrimary : canSend ? session.agent.tint : Theme.selected, in: Circle())
+                .background(stops ? Theme.textPrimary : canSend ? session.agent.tint : Theme.selected, in: Circle())
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
         .disabled(!canSend && !isRunning)
-        .help(isRunning ? "Stop (⌘.)" : "Send (Return)")
+        .help(stops ? "Stop (⌘.)" : isRunning ? "Send when this turn ends (Return)" : "Send (Return)")
     }
 
     private var attachmentStrip: some View {
@@ -508,7 +560,7 @@ struct ComposerView: View {
         dictation.cancel()
         var message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if message.isEmpty { message = images.count == 1 ? "Look at this image." : "Look at these images." }
-        model.send(message, attachments: attachments, images: images, in: session.id)
+        model.submit(message, attachments: attachments, images: images, in: session.id)
         text = ""
         attachments = []
         images = []
@@ -567,6 +619,69 @@ struct ComposerView: View {
 }
 
 /// Shown instead of failing on send when the agent's CLI is missing or signed out.
+/// Kept prompts matching what follows `/` in the box; a click puts one in its place.
+private struct TemplateSuggestions: View {
+    let templates: [PromptTemplate]
+    let pick: (PromptTemplate) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(templates) { template in
+                Button {
+                    pick(template)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(template.title)
+                            .font(Theme.Font.ui.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text(template.text)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    .hoverHighlight(cornerRadius: Theme.Radius.row)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Theme.hairline))
+    }
+}
+
+/// The message waiting for the turn to end; the button takes it back into the box.
+private struct QueuedPill: View {
+    let text: String
+    let takeBack: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "text.append")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            Text("Next: \(text)")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Button("Edit", action: takeBack)
+                .buttonStyle(.plain)
+                .font(Theme.Font.caption.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .help("Take the message back into the box; it won't be sent by itself")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Theme.elevated, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+    }
+}
+
 private struct SetupBanner: View {
     @Environment(AppModel.self) private var model
     let agent: AgentKind

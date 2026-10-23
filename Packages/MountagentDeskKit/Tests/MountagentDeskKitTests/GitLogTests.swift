@@ -74,4 +74,39 @@ import Testing
         #expect(GitLog.References(subject: "Fix the build (#12)").pullRequest == 12)
         #expect(GitLog.References(subject: "Status refresh: QC results").code == nil)
     }
+
+    @Test func readsCommittersFromShortlog() {
+        let output = """
+           120\talexdoe <alex.doe@example.com>
+            14\tAlex Personal <alex@example.org>
+             3\tAlex Doe <Alex.Doe@example.com>
+             1\tAcme ops <ops+bot@example.com>
+        """
+        let authors = GitLog.parseAuthors(output)
+        #expect(authors.map(\.name) == ["alexdoe", "Alex Personal", "Acme ops"])
+        #expect(authors.first?.commits == 123, "the same email in other case is one person")
+        #expect(authors.last?.email == "ops+bot@example.com")
+    }
+
+    @Test func filtersCommitsByAuthors() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MountagentDeskAuthors-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        func git(_ arguments: String...) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-C", root.path] + arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+        }
+        try git("init", "-q")
+        for (name, email) in [("Ann", "ann@x.io"), ("Bob", "bob+dev@x.io"), ("Cy", "cy@x.io"), ("Ann", "ann@x.io")] {
+            try git("-c", "user.name=\(name)", "-c", "user.email=\(email)", "commit", "-q", "--allow-empty", "-m", "by \(name)")
+        }
+        #expect(GitLog.commits(in: root).count == 4)
+        #expect(GitLog.commits(in: root, authors: ["ANN@x.io"]).map(\.author) == ["Ann", "Ann"])
+        #expect(Set(GitLog.commits(in: root, authors: ["bob+dev@x.io", "cy@x.io"]).map(\.author)) == ["Bob", "Cy"], "a plus in the email is literal")
+        #expect(GitLog.authors(in: root).map(\.name) == ["Ann", "Bob", "Cy"])
+    }
 }

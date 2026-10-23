@@ -106,8 +106,10 @@ public struct GitInspector: Sendable {
     func git(_ arguments: [String], allowFailure: Bool = false) throws -> String {
         let process = Process()
         process.executableURL = ExecutableLocator.find("git") ?? URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", root.path, "-c", "core.quotepath=off"] + arguments
-        process.environment = ExecutableLocator.environment
+        process.arguments = ["-C", root.path, "-c", "core.quotepath=off"] + (try GitSafety.arguments(arguments, root: root, runsHooks: true))
+        var environment = ExecutableLocator.environment
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = environment
         process.standardInput = FileHandle.nullDevice
         let output = Pipe()
         let errors = Pipe()

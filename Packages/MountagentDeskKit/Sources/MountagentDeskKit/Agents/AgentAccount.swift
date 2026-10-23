@@ -24,9 +24,12 @@ public struct AgentAccount: Equatable, Sendable {
 /// Reads account details from each CLI's own status commands.
 public struct AccountProbe: Sendable {
     public var runner: AgentRunner
+    /// The GitHub account Copilot runs as (its `gh` token), when one is chosen.
+    public var copilotLogin: String?
 
-    public init(runner: AgentRunner) {
+    public init(runner: AgentRunner, copilotLogin: String? = nil) {
         self.runner = runner
+        self.copilotLogin = copilotLogin
     }
 
     public func probe(_ kind: AgentKind) -> AgentAccount {
@@ -66,6 +69,22 @@ public struct AccountProbe: Sendable {
             account.loggedIn = !models.isEmpty && !models.localizedCaseInsensitiveContains("sign in")
             account.authMethod = account.loggedIn ? "Google account" : nil
             account.plan = account.authMethod
+        case .copilot:
+            if let version = try? runner.capture(.copilot, arguments: ["--version"], timeout: 20) {
+                account.version = CopilotProvider.parseVersion(version)
+            }
+            if let login = copilotLogin, GitHubCLI.token(for: login) != nil {
+                account.loggedIn = true
+                account.email = login
+                account.authMethod = "GitHub account (gh)"
+            } else {
+                // `copilot login` keeps who signed in in its config file.
+                let config = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".copilot/config.json")
+                let text = (try? String(contentsOf: config, encoding: .utf8)) ?? ""
+                account.loggedIn = text.contains("logged_in") || text.contains("loggedIn")
+                account.authMethod = account.loggedIn ? "copilot login" : nil
+            }
+            account.plan = account.loggedIn ? "Copilot" : nil
         }
         return account
     }
@@ -118,6 +137,7 @@ public enum AgentSetup {
         case .codex: "if command -v brew >/dev/null; then brew install --cask codex; else npm install -g @openai/codex; fi"
         // Google's installer: a checksummed Go binary into ~/.local/bin.
         case .antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+        case .copilot: "npm install -g @github/copilot"
         }
     }
 
@@ -127,7 +147,7 @@ public enum AgentSetup {
         let cli = executable.map(Shell.quote) ?? kind.executableName
         return switch kind {
         case .claude: "\(cli) auth login"
-        case .cursor, .codex: "\(cli) login"
+        case .cursor, .codex, .copilot: "\(cli) login"
         // `agy` has no login command: started bare, it signs in through the browser.
         case .antigravity: cli
         }
@@ -172,7 +192,7 @@ public enum AgentSetup {
         return switch kind {
         case .claude: "\(cli) auth logout"
         case .cursor, .codex: "\(cli) logout"
-        case .antigravity: nil
+        case .antigravity, .copilot: nil
         }
     }
 
@@ -180,7 +200,7 @@ public enum AgentSetup {
         let cli = executable.map(Shell.quote) ?? kind.executableName
         let viaBrew = executable.map { $0.hasPrefix("/opt/homebrew/") || $0.hasPrefix("/usr/local/") } ?? false
         return switch kind {
-        case .claude, .cursor, .antigravity: "\(cli) update"
+        case .claude, .cursor, .antigravity, .copilot: "\(cli) update"
         case .codex: viaBrew ? "brew upgrade --cask codex" : "npm install -g @openai/codex@latest"
         }
     }
@@ -192,6 +212,7 @@ public enum AgentSetup {
         case .cursor: URL(string: "https://cursor.com/dashboard?tab=usage")!
         case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
         case .antigravity: URL(string: "https://antigravity.google")!
+        case .copilot: URL(string: "https://github.com/settings/billing/premium_requests_usage")!
         }
     }
 }
@@ -246,28 +267,62 @@ public struct UsageLedger: Codable, Equatable, Sendable {
 
     /// `agent rawValue` → `yyyy-MM-dd` → totals.
     public var days: [String: [String: Entry]] = [:]
+    /// The same per project (`project id` → `yyyy-MM-dd` → totals), for a client's share.
+    public var projects: [String: [String: Entry]] = [:]
 
     public init() {}
 
-    public mutating func record(_ result: TurnResult, agent: AgentKind, on date: Date = .now) {
-        var entry = days[agent.rawValue]?[Self.key(date)] ?? Entry()
-        entry.turns += 1
-        entry.inputTokens += result.inputTokens ?? 0
-        entry.outputTokens += result.outputTokens ?? 0
+    private enum CodingKeys: String, CodingKey { case days, projects }
+
+    // Ledgers saved before the per-project totals have none.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        days = try container.decodeIfPresent([String: [String: Entry]].self, forKey: .days) ?? [:]
+        projects = try container.decodeIfPresent([String: [String: Entry]].self, forKey: .projects) ?? [:]
+    }
+
+    public mutating func record(_ result: TurnResult, agent: AgentKind, project: UUID? = nil, on date: Date = .now) {
+        var turn = Entry()
+        turn.turns = 1
+        turn.inputTokens = result.inputTokens ?? 0
+        turn.outputTokens = result.outputTokens ?? 0
         if let cost = result.costUSD {
-            entry.costUSD += cost
-            entry.hasCost = true
+            turn.costUSD = cost
+            turn.hasCost = true
         }
-        days[agent.rawValue, default: [:]][Self.key(date)] = entry
+        days[agent.rawValue, default: [:]][Self.key(date), default: Entry()].add(turn)
+        if let project { projects[project.uuidString, default: [:]][Self.key(date), default: Entry()].add(turn) }
+    }
+
+    /// A project's totals for the last `count` days, today included.
+    public func total(forProject project: UUID, lastDays count: Int, now: Date = .now) -> Entry {
+        total(in: projects[project.uuidString] ?? [:], lastDays: count, now: now)
+    }
+
+    /// `date,project,turns,input tokens,output tokens,cost (USD)`, oldest first.
+    public func projectCSV(names: [UUID: String]) -> String {
+        var rows = ["date,project,turns,input_tokens,output_tokens,cost_usd"]
+        let lines = projects.flatMap { id, days in
+            days.map { day, entry in (day, UUID(uuidString: id).flatMap { names[$0] } ?? id, entry) }
+        }
+        for (day, name, entry) in lines.sorted(by: { ($0.0, $0.1) < ($1.0, $1.1) }) {
+            let quoted = "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+            rows.append("\(day),\(quoted),\(entry.turns),\(entry.inputTokens),\(entry.outputTokens),\(entry.hasCost ? String(format: "%.4f", entry.costUSD) : "")")
+        }
+        return rows.joined(separator: "\n") + "\n"
     }
 
     /// Totals for the last `days` days, today included.
     public func total(for agent: AgentKind, lastDays count: Int, now: Date = .now) -> Entry {
+        total(in: days[agent.rawValue] ?? [:], lastDays: count, now: now)
+    }
+
+    private func total(in days: [String: Entry], lastDays count: Int, now: Date) -> Entry {
         var total = Entry()
         let calendar = Calendar.current
         for offset in 0..<count {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: now),
-                  let entry = days[agent.rawValue]?[Self.key(day)]
+                  let entry = days[Self.key(day)]
             else { continue }
             total.add(entry)
         }

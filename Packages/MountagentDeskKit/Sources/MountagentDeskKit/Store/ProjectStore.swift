@@ -6,30 +6,38 @@ import Foundation
 ///     sessions/<project id>/<session id>.json
 ///     usage.json, plan-usage.json, cursor-usage.json, git-accounts.json   (app state)
 ///
-/// Writes are atomic, so a crash never leaves a half-written file.
+/// Writes are atomic, so a crash never leaves a half-written file. A file that no longer
+/// decodes is set aside (`*.corrupt-<date>`) rather than skipped or overwritten, and deleted
+/// sessions go to the Trash.
 public final class ProjectStore: @unchecked Sendable {
     public let root: URL
+    /// Deleted sessions go to the Trash (off for scratch stores in tests).
+    private let trashesDeleted: Bool
     private let fileManager = FileManager.default
-    private let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }()
+    /// Compact: sessions with long tool output run to megabytes, and pretty-printing them
+    /// costs more than it helps.
+    private let encoder = JSONEncoder()
+    /// Session saves, in order, off the main thread.
+    private let writes = DispatchQueue(label: "Mountagent Desk session writes", qos: .utility)
     private let decoder = JSONDecoder()
 
-    public init(root: URL) {
+    public init(root: URL, trashesDeleted: Bool = true) {
         self.root = root
+        self.trashesDeleted = trashesDeleted
     }
 
-    /// `MOUNTAGENT_DATA_DIR` points the app at a scratch store for development.
+    /// `MOUNTAGENT_DATA_DIR` points a debug build at a scratch store. Release builds ignore
+    /// it: an agent could otherwise run the app's own executable on a store it wrote itself.
     public static func defaultRoot() -> URL {
+        #if DEBUG
         if let override = ProcessInfo.processInfo.environment["MOUNTAGENT_DATA_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
+        #endif
         return standardRoot
     }
 
-    private static let standardRoot: URL = {
+    static let standardRoot: URL = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let root = support.appendingPathComponent("Mountagent Desk", isDirectory: true)
         moveLegacyData(from: support.appendingPathComponent("AgentDesk", isDirectory: true), to: root)
@@ -72,11 +80,24 @@ public final class ProjectStore: @unchecked Sendable {
     }
 
     public func deleteSessions(of projectID: UUID) throws {
-        let directory = sessionsDirectory(projectID)
-        if fileManager.fileExists(atPath: directory.path) {
-            try fileManager.removeItem(at: directory)
+        try remove(sessionsDirectory(projectID))
+    }
+
+    /// Copies a file that no longer decodes to `<name>.corrupt-<date>`, so a later save can't
+    /// lose what was in it; returns the copy. `moving` takes the original away as well.
+    @discardableResult
+    public func setAside(_ file: URL, moving: Bool = false) -> URL? {
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+        let copy = file.deletingPathExtension().appendingPathExtension("corrupt-\(stamp)")
+        do {
+            if moving { try fileManager.moveItem(at: file, to: copy) } else { try fileManager.copyItem(at: file, to: copy) }
+            return copy
+        } catch {
+            return nil
         }
     }
+
+    public var projectsFileURL: URL { projectsFile }
 
     // MARK: App state
 
@@ -93,25 +114,62 @@ public final class ProjectStore: @unchecked Sendable {
 
     // MARK: Sessions
 
-    /// Newest first. Files that fail to decode are skipped rather than failing the whole list.
+    /// Newest first.
     public func loadSessions(of projectID: UUID) -> [ChatSession] {
+        loadSessionsSettingAsideDamage(of: projectID).sessions
+    }
+
+    /// Newest first. A file that fails to decode doesn't fail the list: it is moved aside
+    /// (`*.corrupt-<date>`) and returned, so the user can be told.
+    public func loadSessionsSettingAsideDamage(of projectID: UUID) -> (sessions: [ChatSession], setAside: [URL]) {
         let directory = sessionsDirectory(projectID)
         let files = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        return files
-            .filter { $0.pathExtension == "json" }
-            .compactMap { try? decoder.decode(ChatSession.self, from: Data(contentsOf: $0)) }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let jsonFiles = files.filter { $0.pathExtension == "json" }
+        // Decoded side by side: a project's sessions can add up to many megabytes.
+        let decoded = UnsafeMutableBufferPointer<ChatSession?>.allocate(capacity: jsonFiles.count)
+        decoded.initialize(repeating: nil)
+        defer { decoded.deallocate() }
+        DispatchQueue.concurrentPerform(iterations: jsonFiles.count) { index in
+            decoded[index] = try? JSONDecoder().decode(ChatSession.self, from: Data(contentsOf: jsonFiles[index]))
+        }
+        var sessions: [ChatSession] = []
+        var setAside: [URL] = []
+        for (index, file) in jsonFiles.enumerated() {
+            if let session = decoded[index] {
+                sessions.append(session)
+            } else if let copy = self.setAside(file, moving: true) {
+                setAside.append(copy)
+            }
+        }
+        return (sessions.sorted { $0.updatedAt > $1.updatedAt }, setAside)
     }
 
     public func save(_ session: ChatSession) throws {
         try write(session, to: sessionFile(session))
     }
 
-    public func delete(_ session: ChatSession) throws {
+    /// Saves on a background queue, in the order asked; `failed` runs there on an error.
+    public func saveLater(_ session: ChatSession, failed: @escaping @Sendable (any Error) -> Void) {
         let file = sessionFile(session)
-        if fileManager.fileExists(atPath: file.path) {
-            try fileManager.removeItem(at: file)
+        writes.async { [self] in
+            do { try write(session, to: file) } catch { failed(error) }
         }
+    }
+
+    /// Waits for the saves already asked for (on quit).
+    public func finishWrites() {
+        writes.sync {}
+    }
+
+    public func delete(_ session: ChatSession) throws {
+        try remove(sessionFile(session))
+    }
+
+    /// To the Trash when it can (so a slip can be undone in Finder), else gone.
+    private func remove(_ url: URL) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        if trashesDeleted, (try? fileManager.trashItem(at: url, resultingItemURL: nil)) != nil { return }
+        try fileManager.removeItem(at: url)
     }
 
     private func write(_ value: some Encodable, to file: URL) throws {

@@ -1,9 +1,8 @@
 import MountagentDeskKit
 import SwiftUI
-import WebKit
 
 /// The right-hand panel, as in Cursor's Agents window: "On <branch>" with Changes, Git,
-/// Browser, Terminal and Files. Picking one opens it in the panel; the back button returns.
+/// Terminal, Servers and Files. Picking one opens it in the panel; the back button returns.
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -13,14 +12,14 @@ struct InspectorView: View {
     @State private var changes = ChangesState()
 
     enum Tool: String, CaseIterable {
-        case changes, git, browser, terminal, files
+        case changes, git, terminal, servers, files
 
         var title: String {
             switch self {
             case .changes: "Changes"
             case .git: "Git"
-            case .browser: "Browser"
             case .terminal: "Terminal"
+            case .servers: "Servers"
             case .files: "Files"
             }
         }
@@ -29,9 +28,20 @@ struct InspectorView: View {
             switch self {
             case .changes: "plusminus"
             case .git: "arrow.triangle.branch"
-            case .browser: "globe"
             case .terminal: "apple.terminal"
+            case .servers: "server.rack"
             case .files: "doc"
+            }
+        }
+
+        /// The same hues as the matching Settings panes.
+        var tint: Color {
+            switch self {
+            case .changes: Color(light: 0x0F8A5F, dark: 0x2EA772)
+            case .git: Color(light: 0x1F6FEB, dark: 0x2F81F7)
+            case .terminal: Color(light: 0x4B5563, dark: 0x6B7280)
+            case .servers: Color(light: 0xB25E09, dark: 0xE08A2E)
+            case .files: Color(light: 0x8B3FD9, dark: 0x9F67F0)
             }
         }
     }
@@ -46,8 +56,8 @@ struct InspectorView: View {
                     switch tool {
                     case .changes: ChangesPanel(project: project, state: changes)
                     case .git: GitPanel(project: project)
-                    case .browser: BrowserPanel(project: project)
                     case .terminal: TerminalPanel(project: project)
+                    case .servers: ServersPanel(project: project)
                     case .files: FilesPanel(project: project)
                     }
                 }
@@ -84,11 +94,8 @@ struct InspectorView: View {
                 Button {
                     toolStore = tool.rawValue
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: tool.symbol)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 16)
+                    HStack(spacing: 9) {
+                        TintedIcon(symbol: tool.symbol, tint: tool.tint, size: 20)
                         Text(tool.title)
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.textPrimary)
@@ -97,8 +104,8 @@ struct InspectorView: View {
                         }
                         Spacer()
                     }
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
+                    .padding(.horizontal, 6)
+                    .frame(height: 32)
                     .hoverHighlight()
                 }
                 .buttonStyle(.plain)
@@ -111,9 +118,8 @@ struct InspectorView: View {
     private func header(_ tool: Tool) -> some View {
         HStack(spacing: 4) {
             ChromeButton(symbol: "chevron.left", help: "Back") { toolStore = "" }
-            Image(systemName: tool.symbol)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+            TintedIcon(symbol: tool.symbol, tint: tool.tint, size: 16)
+                .padding(.trailing, 2)
             Text(tool.title)
                 .font(Theme.Font.uiMedium)
                 .foregroundStyle(Theme.textPrimary)
@@ -374,80 +380,12 @@ private struct PanelPlaceholder: View {
     }
 }
 
-// MARK: - Browser
-
-/// Web views live per project so pages survive switching panels and sessions.
-@MainActor
-final class BrowserStore {
-    static let shared = BrowserStore()
-    private var views: [UUID: WKWebView] = [:]
-
-    func view(for project: Project) -> WKWebView {
-        if let view = views[project.id] { return view }
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        view.allowsBackForwardNavigationGestures = true
-        views[project.id] = view
-        return view
-    }
-}
-
-private struct BrowserPanel: View {
-    let project: Project
-    @State private var address = ""
-    @AppStorage("browserLastURL") private var lastURL = "http://localhost:8069"
-
-    var body: some View {
-        let webView = BrowserStore.shared.view(for: project)
-        VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                ChromeButton(symbol: "chevron.left", help: "Back") { webView.goBack() }
-                ChromeButton(symbol: "chevron.right", help: "Forward") { webView.goForward() }
-                ChromeButton(symbol: "arrow.clockwise", help: "Reload") { webView.reload() }
-                TextField("Address", text: $address)
-                    .textFieldStyle(.plain)
-                    .font(Theme.Font.ui)
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(Theme.userFill, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).strokeBorder(Theme.hairline))
-                    .onSubmit { load(address, in: webView) }
-                ChromeButton(symbol: "safari", help: "Open in default browser") {
-                    if let url = webView.url { NSWorkspace.shared.open(url) }
-                }
-            }
-            .padding(.horizontal, 6)
-            .frame(height: 34)
-            WebView(view: webView)
-        }
-        .onAppear {
-            address = webView.url?.absoluteString ?? lastURL
-            if webView.url == nil { load(address, in: webView) }
-        }
-    }
-
-    private func load(_ text: String, in webView: WKWebView) {
-        var string = text.trimmingCharacters(in: .whitespaces)
-        guard !string.isEmpty else { return }
-        if !string.contains("://") { string = (string.hasPrefix("localhost") || string.first?.isNumber == true ? "http://" : "https://") + string }
-        guard let url = URL(string: string) else { return }
-        address = string
-        lastURL = string
-        webView.load(URLRequest(url: url))
-    }
-}
-
-private struct WebView: NSViewRepresentable {
-    let view: WKWebView
-    func makeNSView(context: Context) -> WKWebView { view }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
-}
-
 // MARK: - Terminal
 
 private struct TerminalPanel: View {
     let project: Project
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(TerminalTheme.key) private var theme = TerminalTheme.app
     @State private var generation = 0
 
     var body: some View {
@@ -467,10 +405,11 @@ private struct TerminalPanel: View {
             .padding(.leading, 10)
             .padding(.trailing, 6)
             .frame(height: 30)
-            TerminalHost(project: project, dark: colorScheme == .dark)
+            TerminalHost(project: project, dark: colorScheme == .dark, theme: theme)
                 .id(generation)
                 .padding(.leading, 8)
                 .padding(.vertical, 4)
+                .background(theme.background(dark: colorScheme == .dark))
         }
         .background(Theme.codeBackground)
     }

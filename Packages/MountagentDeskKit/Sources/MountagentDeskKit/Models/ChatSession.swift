@@ -20,6 +20,12 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     public var items: [ChatItem]
     /// The branch the main folder was on when this session last ran a turn.
     public var branch: String?
+    /// Kept, but out of the sidebar's list.
+    public var archived = false
+    /// The session's own working copy (`GitWorktree`), where its agents run instead of the
+    /// project's main folder, and that copy's branch.
+    public var worktree: String?
+    public var worktreeBranch: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -67,8 +73,12 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
         access = try container.decodeIfPresent(AccessLevel.self, forKey: .access) ?? .editFiles
         agentSessionIDs = try Self.perAgent(String.self, in: container, forKey: .agentSessionIDs)
         seenCounts = try Self.perAgent(Int.self, in: container, forKey: .seenCounts)
-        items = try container.decodeIfPresent([ChatItem].self, forKey: .items) ?? []
+        // One row this version can't read (a newer kind, say) mustn't hide the whole session.
+        items = try container.decodeIfPresent([Lossy<ChatItem>].self, forKey: .items)?.compactMap(\.value) ?? []
         branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        worktree = try container.decodeIfPresent(String.self, forKey: .worktree)
+        worktreeBranch = try container.decodeIfPresent(String.self, forKey: .worktreeBranch)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
@@ -151,6 +161,10 @@ public struct ChatItem: Codable, Identifiable, Hashable, Sendable {
     /// Images sent with a user message (paths in Mountagent Desk's attachments folder).
     public var images: [String]?
 
+    /// On a user row: the git checkpoint of the main folder taken before the agent's turn
+    /// (`GitCheckpoint`). On a "reverted" notice: the state just before the revert.
+    public var checkpoint: String?
+
     public init(
         id: UUID = UUID(),
         kind: Kind,
@@ -179,5 +193,14 @@ public struct ChatItem: Codable, Identifiable, Hashable, Sendable {
         self.permissionRule = permissionRule
         self.isError = isError
         self.attachments = attachments
+    }
+}
+
+/// Decodes a value or nothing, so one bad element doesn't fail its array.
+struct Lossy<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: any Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }

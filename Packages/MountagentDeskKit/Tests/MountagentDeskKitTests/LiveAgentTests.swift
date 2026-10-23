@@ -13,7 +13,7 @@ struct LiveAgentTests {
         return url
     }()
 
-    private func turn(_ text: String, agent: AgentKind, model: String?, session: inout ChatSession) async throws -> TurnResult? {
+    private func turn(_ text: String, agent: AgentKind, model: String?, session: inout ChatSession, environment: [String: String] = [:]) async throws -> TurnResult? {
         let missed = session.unseenItems(for: agent)
         session.agent = agent
         session.items.append(ChatItem(kind: .user, text: text))
@@ -24,7 +24,9 @@ struct LiveAgentTests {
             access: .editFiles,
             resumeSessionID: session.agentSessionIDs[agent]
         )
-        let run = try AgentRunner().start(request, with: AgentProviders.provider(for: agent))
+        var withEnvironment = request
+        withEnvironment.environment = environment
+        let run = try AgentRunner().start(withEnvironment, with: AgentProviders.provider(for: agent))
         var reducer = TranscriptReducer(agent: agent)
         for await event in run.events {
             reducer.apply(event, to: &session)
@@ -50,6 +52,33 @@ struct LiveAgentTests {
         let third = try await turn("Reply with the number 7 and nothing else.", agent: .claude, model: "haiku", session: &session)
         #expect(third?.isError == false)
         #expect(session.agentSessionIDs.count == 2)
+    }
+
+    @Test func copilotAccountIsSignedIn() throws {
+        let login = try #require(ProcessInfo.processInfo.environment["MOUNTAGENT_COPILOT_LOGIN"])
+        let account = AccountProbe(runner: AgentRunner(), copilotLogin: login).probe(.copilot)
+        #expect(account.isInstalled)
+        #expect(account.version != nil)
+        #expect(account.loggedIn)
+        #expect(account.email == login)
+    }
+
+    /// Signs in as `MOUNTAGENT_COPILOT_LOGIN`'s gh account, else Copilot's own sign-in.
+    @Test func copilotReadsAndResumes() async throws {
+        var environment: [String: String] = [:]
+        if let login = ProcessInfo.processInfo.environment["MOUNTAGENT_COPILOT_LOGIN"], let token = GitHubCLI.token(for: login) {
+            environment[CopilotProvider.tokenVariable] = token
+        }
+        var session = ChatSession(projectID: UUID(), agent: .copilot)
+        let first = try await turn("Read secret.txt and reply with only the word in it.", agent: .copilot, model: nil, session: &session, environment: environment)
+        #expect(first?.isError == false)
+        #expect(session.items.contains { $0.kind == .tool && $0.toolStatus == .succeeded })
+        #expect(session.items.last { $0.kind == .assistant }?.text.lowercased().contains("pineapple") == true)
+        #expect(session.agentSessionIDs[.copilot] != nil)
+
+        let second = try await turn("Reply with the number 7 and nothing else.", agent: .copilot, model: nil, session: &session, environment: environment)
+        #expect(second?.isError == false)
+        #expect(session.items.last { $0.kind == .assistant }?.text.contains("7") == true)
     }
 
     @Test func codexReadsAndResumes() async throws {

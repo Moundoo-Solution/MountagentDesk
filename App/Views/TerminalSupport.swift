@@ -34,6 +34,7 @@ final class TerminalStore {
 struct TerminalHost: NSViewRepresentable {
     let project: Project
     let dark: Bool
+    let theme: TerminalTheme
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let view = TerminalStore.shared.view(for: project)
@@ -47,7 +48,7 @@ struct TerminalHost: NSViewRepresentable {
     }
 
     private func style(_ view: LocalProcessTerminalView) {
-        TerminalShell.style(view, dark: dark)
+        TerminalShell.style(view, dark: dark, theme: theme)
     }
 }
 
@@ -59,7 +60,12 @@ enum TerminalShell {
         var environment = ExecutableLocator.environment
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
+        // Colors in macOS's ls and other BSD tools.
+        environment["CLICOLOR"] = "1"
         let name = (shell as NSString).lastPathComponent
+        if name == "zsh", let zdotdir = zshDirectory {
+            environment.merge(ShellPrompt.environment(zdotdir: zdotdir, current: environment)) { _, new in new }
+        }
         view.startProcess(
             executable: shell,
             args: arguments,
@@ -70,12 +76,23 @@ enum TerminalShell {
         )
     }
 
+    /// Startup files that load the user's own and add a colored prompt (see `ShellPrompt`).
+    @MainActor private static let zshDirectory = try? ShellPrompt.install(in: ProjectStore.defaultRoot())
+
+    /// The scheme each view has, so the palette is only installed when it changes.
+    @MainActor private static var installed: [ObjectIdentifier: TerminalTheme.Scheme] = [:]
+
     @MainActor
-    static func style(_ view: LocalProcessTerminalView, dark: Bool) {
-        let ink = NSColor(hex: dark ? Theme.Hex.inkDark : Theme.Hex.inkLight)
-        view.nativeBackgroundColor = NSColor(hex: dark ? Theme.Hex.sidebarDark : Theme.Hex.sidebarLight)
-        view.nativeForegroundColor = ink.withAlphaComponent(0.92)
-        view.caretColor = ink
+    static func style(_ view: LocalProcessTerminalView, dark: Bool, theme: TerminalTheme = .current) {
+        let scheme = theme.scheme(dark: dark)
+        guard installed[ObjectIdentifier(view)] != scheme else { return }
+        installed[ObjectIdentifier(view)] = scheme
+        view.nativeBackgroundColor = NSColor(hex: scheme.background)
+        view.nativeForegroundColor = NSColor(hex: scheme.foreground)
+        view.caretColor = NSColor(hex: scheme.cursor)
+        view.installColors(scheme.ansi.map { hex in
+            SwiftTerm.Color(red8: UInt16(hex >> 16 & 0xFF), green8: UInt16(hex >> 8 & 0xFF), blue8: UInt16(hex & 0xFF))
+        })
     }
 }
 
@@ -181,5 +198,169 @@ struct SetupTerminal: NSViewRepresentable {
     static func dismantleNSView(_ view: LocalProcessTerminalView, coordinator: Coordinator) {
         (view as? WatchedTerminalView)?.stopWatching()
         view.terminate()
+    }
+}
+
+// MARK: - Server terminals
+
+/// SSH sessions opened from the Servers panel, kept while the app runs so switching panels
+/// or sessions doesn't drop them. Each tab belongs to one project.
+@MainActor
+@Observable
+final class ServerTerminals {
+    static let shared = ServerTerminals()
+
+    struct Tab: Identifiable, Equatable {
+        let id = UUID()
+        let serverID: UUID
+        let projectID: UUID
+        var connected = true
+        /// Bumped on reconnect, so the panel swaps in the new terminal view.
+        var generation = 0
+    }
+
+    private(set) var tabs: [Tab] = []
+    /// The tab shown in each project's panel.
+    var selected: [UUID: UUID] = [:]
+    /// Called with (server id, command) whenever the user runs a command in a tab.
+    @ObservationIgnored var onCommand: ((UUID, String) -> Void)?
+    @ObservationIgnored private var views: [UUID: LocalProcessTerminalView] = [:]
+    @ObservationIgnored private var watchers: [UUID: Watcher] = [:]
+
+    func tabs(of projectID: UUID) -> [Tab] {
+        tabs.filter { $0.projectID == projectID }
+    }
+
+    func open(_ login: SSHLogin, in projectID: UUID) {
+        let tab = Tab(serverID: login.server.id, projectID: projectID)
+        tabs.append(tab)
+        start(login, in: tab.id)
+        selected[projectID] = tab.id
+    }
+
+    func reconnect(_ tabID: UUID, to login: SSHLogin) {
+        views.removeValue(forKey: tabID)?.terminate()
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        tabs[index].connected = true
+        tabs[index].generation += 1
+        start(login, in: tabID)
+    }
+
+    func close(_ tabID: UUID) {
+        views.removeValue(forKey: tabID)?.terminate()
+        watchers[tabID] = nil
+        guard let tab = tabs.first(where: { $0.id == tabID }) else { return }
+        tabs.removeAll { $0.id == tabID }
+        if selected[tab.projectID] == tabID { selected[tab.projectID] = tabs(of: tab.projectID).last?.id }
+    }
+
+    func terminateAll() {
+        views.values.forEach { $0.terminate() }
+        views.removeAll()
+    }
+
+    func view(for tabID: UUID) -> LocalProcessTerminalView? {
+        views[tabID]
+    }
+
+    /// Types `text` at the prompt without pressing Return.
+    func type(_ text: String, in tabID: UUID) {
+        guard let view = views[tabID] else { return }
+        view.send(data: ArraySlice(Array(text.utf8)))
+        view.window?.makeFirstResponder(view)
+    }
+
+    func selection(in tabID: UUID) -> String? {
+        views[tabID]?.getSelection().flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The last `count` non-blank lines on screen and in the scrollback.
+    func recentOutput(in tabID: UUID, lines count: Int) -> String {
+        guard let view = views[tabID] else { return "" }
+        var lines = String(decoding: view.getBufferAsData(), as: UTF8.self)
+            .components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.suffix(count).joined(separator: "\n")
+    }
+
+    private func start(_ login: SSHLogin, in tabID: UUID) {
+        let view = RecordingTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let serverID = login.server.id
+        view.onCommand = { [weak self] command in self?.onCommand?(serverID, command) }
+        view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let watcher = Watcher { [weak self] in self?.disconnected(tabID) }
+        watchers[tabID] = watcher
+        view.processDelegate = watcher
+        var environment = ExecutableLocator.environment
+        environment["TERM"] = "xterm-256color"
+        environment["COLORTERM"] = "truecolor"
+        environment["CLICOLOR"] = "1"
+        environment.merge(login.askpassEnvironment(askpass: ServerHelper.askpassExecutable)) { _, new in new }
+        view.startProcess(
+            executable: "/usr/bin/ssh",
+            args: login.interactiveArguments,
+            environment: environment.map { "\($0.key)=\($0.value)" },
+            currentDirectory: NSHomeDirectory()
+        )
+        views[tabID] = view
+    }
+
+    private func disconnected(_ tabID: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        tabs[index].connected = false
+    }
+
+    final class Watcher: NSObject, LocalProcessTerminalViewDelegate {
+        let ended: @MainActor () -> Void
+
+        init(ended: @escaping @MainActor () -> Void) {
+            self.ended = ended
+        }
+
+        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
+        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+        func processTerminated(source: TerminalView, exitCode: Int32?) {
+            let ended = ended
+            DispatchQueue.main.async { ended() }
+        }
+    }
+}
+
+/// A terminal that reports the command on screen each time the user presses Return, for
+/// the server's command history.
+final class RecordingTerminalView: LocalProcessTerminalView {
+    var onCommand: ((String) -> Void)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        // A typed Return (a paste of several lines is left alone).
+        if data.count <= 2, data.contains(13), let onCommand {
+            let tail = getBufferAsData().suffix(16_384)
+            let screen = String(decoding: tail, as: UTF8.self)
+            if let command = ServerCommandHistory.commandLine(fromScreen: screen, columns: terminalDimensions.cols) {
+                onCommand(command)
+            }
+        }
+        super.send(source: source, data: data)
+    }
+}
+
+/// One server tab's terminal.
+struct ServerTerminalHost: NSViewRepresentable {
+    let tabID: UUID
+    let dark: Bool
+    let theme: TerminalTheme
+
+    func makeNSView(context: Context) -> NSView {
+        guard let view = ServerTerminals.shared.view(for: tabID) else { return NSView() }
+        TerminalShell.style(view, dark: dark, theme: theme)
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        if let view = view as? LocalProcessTerminalView { TerminalShell.style(view, dark: dark, theme: theme) }
     }
 }

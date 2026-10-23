@@ -17,12 +17,12 @@ import Testing
     @Test func appliesAndClearsAnAccount() throws {
         let root = try repo()
         let repository = GitRepository(root: root)
-        let account = GitAccount(label: "Personal", name: "Son Tran", email: "son@example.com", sshKeyPath: "/Users/me/.ssh/id personal")
+        let account = GitAccount(label: "Personal", name: "Alex Doe", email: "alex@example.com", sshKeyPath: "/Users/me/.ssh/id personal")
         try repository.apply(account)
 
         let identity = repository.identity()
-        #expect(identity.name == "Son Tran")
-        #expect(identity.email == "son@example.com")
+        #expect(identity.name == "Alex Doe")
+        #expect(identity.email == "alex@example.com")
         #expect(identity.isLocal)
         #expect(identity.sshCommand == "ssh -i '/Users/me/.ssh/id personal' -o IdentitiesOnly=yes")
 

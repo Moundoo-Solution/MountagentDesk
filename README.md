@@ -8,13 +8,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-e5383b" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-252a30" alt="macOS 14 or later">
   <img src="https://img.shields.io/badge/Swift-6-252a30" alt="Swift 6">
-  <img src="https://img.shields.io/badge/agents-Claude%20Code%20·%20Cursor%20·%20Codex%20·%20Antigravity-252a30" alt="Agents: Claude Code, Cursor, Codex, Antigravity">
+  <img src="https://img.shields.io/badge/agents-Claude%20Code%20·%20Cursor%20·%20Codex%20·%20Antigravity%20·%20Copilot-252a30" alt="Agents: Claude Code, Cursor, Codex, Antigravity, GitHub Copilot">
 </p>
 
 <h2 align="center">Every coding agent, in one native Mac window.</h2>
 
 <p align="center">
-  Chat with Claude Code, Cursor, Codex and Antigravity side by side. Switch agents between
+  Chat with Claude Code, Cursor, Codex, Antigravity and GitHub Copilot side by side. Switch agents between
   messages, approve their commands like in the IDEs, and review the changes and Git history
   without leaving the conversation.
 </p>
@@ -39,13 +39,16 @@ project, so they keep working in Cursor, in the `claude` terminal and in Codex t
 
 ## What it does
 
-### Four agents, one conversation
+### Five agents, one conversation
 
 Each session is a separate conversation with its own transcript, and several can run at
 once. Pick the agent for every message:
 
 - **Claude Code** (`claude`) and **Cursor** (`cursor-agent`) stream their replies,
   thinking and tool calls as they work.
+- **GitHub Copilot** (`copilot -p`) streams its replies, thinking and tool calls too. It
+  runs as a GitHub account you pick from those signed in to `gh`, or as its own
+  `copilot login`.
 - **Codex** (`codex exec`) and **Antigravity** (`agy`) run headless; their access maps
   onto their own sandbox and permission modes.
 
@@ -79,7 +82,6 @@ Open it with ⌥⌘I, under "On ‹branch›":
 - **Changes**: uncommitted changes against HEAD, untracked files included, each with +/−
   counts and a colored diff. It refreshes after every turn.
 - **Git**: the Git workspace below, inside the panel.
-- **Browser**: an embedded web view, for example for `localhost:8069`.
 - **Terminal**: a real login shell in the project folder, built on
   [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
 - **Files**: the project's folders as a tree, with a preview. Mention a file in the message
@@ -120,6 +122,25 @@ and weekly plan limits with their reset times; for every agent, the tokens and c
 through Mountagent Desk over today, 7 days and 30 days. A missing or signed-out CLI gets an
 **Install & Sign In…** banner that runs the official installer and sign-in in a terminal
 sheet.
+
+### Safe to let run
+
+- **Revert this turn**: before each turn the files are checkpointed in git (without
+  touching your index or branches); one click under a reply puts them back, and the
+  notice's Undo brings the newer ones back.
+- **A worktree per session**: "New Session in Own Worktree" gives a session its own
+  branch and working copy, so agents in other panes don't edit the same files.
+- Messages sent while an agent works are queued for the end of its turn. Quitting while
+  agents work asks first and keeps what they did.
+- Deleting asks first and moves sessions to the Trash. Damaged files are set aside and
+  reported. File ▸ Back Up Data / Restore from Backup.
+
+### Finding and reusing
+
+- **⌘K** finds a session by title, project or words said in it.
+- **Prompts**: kept prompts in the composer's menu, or type `/` and part of a name.
+- Archive sessions instead of deleting them, and export one as Markdown for a ticket.
+- Each project's usage for the last 30 days in its menu, and all of it as CSV.
 
 ### Projects with more than one folder
 
@@ -163,7 +184,8 @@ Requirements:
 - network access on the first build, so Swift Package Manager can fetch SwiftTerm (in
   Xcode, choose **Trust & Enable** for its build plugin)
 - the agent CLIs you want to use, each signed in once in Terminal: `claude`,
-  `cursor-agent login`, `codex login`, `agy`. Mountagent Desk finds them through your
+  `cursor-agent login`, `codex login`, `agy`, `copilot login` (or pick a `gh` account in
+  **Settings → Agents**). Mountagent Desk finds them through your
   login shell's `PATH`; set other locations in **Settings → Paths**.
 
 ```sh
@@ -238,3 +260,6 @@ open -n "build/Debug.noindex/Mountagent Desk.app" --env MOUNTAGENT_DATA_DIR=/tmp
 ## License
 
 [MIT](LICENSE)
+
+The GitHub Copilot mark (`App/Resources/Assets.xcassets/copilot.symbolset`) is drawn from
+[Primer Octicons](https://github.com/primer/octicons), © GitHub Inc., MIT License.

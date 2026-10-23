@@ -63,6 +63,37 @@ struct FoldersView: View {
                 }
 
                 Section {
+                    if model.servers.isEmpty {
+                        Text("No servers yet. Add them in Settings → Servers.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(model.servers) { server in
+                        Toggle(isOn: Binding(
+                            get: { draft.serverIDs.contains(server.id) },
+                            set: { linked in
+                                draft.serverIDs.removeAll { $0 == server.id }
+                                if linked { draft.serverIDs.append(server.id) }
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Circle().fill(server.environment.tint).frame(width: 7, height: 7)
+                                Text(server.name)
+                                Text(model.login(for: server).destination)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Servers")
+                } footer: {
+                    Text("Linked servers open in the right panel's Servers. Agents in this project can't reach them, except read-only on servers where you turn on agent access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
                     Toggle("Also load rules from the other folders", isOn: $draft.loadsAdditionalRules)
                         .disabled(draft.additionalPaths.isEmpty)
                 } footer: {

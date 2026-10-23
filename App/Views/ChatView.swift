@@ -99,7 +99,7 @@ struct ChatView: View {
                 model.contextProject = project
             }
             .disabled(project == nil)
-            ChromeButton(symbol: "sidebar.right", help: inspectorVisible ? "Hide the side panel (⌥⌘I)" : "Show Changes, Git, Browser, Terminal & Files (⌥⌘I)") {
+            ChromeButton(symbol: "sidebar.right", help: inspectorVisible ? "Hide the side panel (⌥⌘I)" : "Show Changes, Git, Terminal, Servers & Files (⌥⌘I)") {
                 inspectorVisible.toggle()
             }
             .keyboardShortcut("i", modifiers: [.option, .command])
@@ -358,7 +358,7 @@ private struct WorkingGlow: View {
     private static let lap: Double = 2.4
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: Theme.animationInterval, paused: reduceMotion)) { context in
             let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.lap) / Self.lap
             let light = AngularGradient(
                 stops: [
@@ -372,7 +372,8 @@ private struct WorkingGlow: View {
             )
             ZStack {
                 Rectangle().strokeBorder(tint.opacity(0.25), lineWidth: 1)
-                Rectangle().strokeBorder(light, lineWidth: 6).blur(radius: 6).opacity(0.7)
+                // A wide, faint stroke for the glow: a blur here redrew the whole pane 30 times a second.
+                Rectangle().strokeBorder(light, lineWidth: 5).opacity(0.25)
                 Rectangle().strokeBorder(light, lineWidth: 2)
             }
         }
@@ -387,7 +388,11 @@ private struct SessionChat: View {
     let index: Int
     let isActive: Bool
     let showsHeader: Bool
-    @State private var draft = ""
+
+    /// Kept in the model, so switching sessions doesn't lose what was being written.
+    private var draft: Binding<String> {
+        Binding(get: { model.drafts[session.id] ?? "" }, set: { model.drafts[session.id] = $0.isEmpty ? nil : $0 })
+    }
 
     var body: some View {
         let project = model.project(session.projectID)
@@ -395,16 +400,17 @@ private struct SessionChat: View {
             if showsHeader {
                 PaneHeader(session: session, project: project, index: index, isActive: isActive)
             }
-            TranscriptView(session: session, isRunning: model.isRunning(session.id), draft: $draft)
+            TranscriptView(session: session, isRunning: model.isRunning(session.id), draft: draft)
                 .environment(\.project, project)
                 .environment(\.sessionID, session.id)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    ComposerView(session: session, text: $draft)
+                    ComposerView(session: session, text: draft)
                 }
         }
         .onReceive(NotificationCenter.default.publisher(for: .insertIntoComposer)) { note in
             guard isActive, let text = note.userInfo?["text"] as? String else { return }
-            draft += (draft.isEmpty || draft.hasSuffix(" ") ? "" : " ") + text + " "
+            let current = draft.wrappedValue
+            draft.wrappedValue = current + (current.isEmpty || current.hasSuffix(" ") ? "" : " ") + text + " "
         }
     }
 }
@@ -427,7 +433,7 @@ private struct PaneHeader: View {
                 .frame(width: 15, height: 15)
                 .background(isActive ? session.agent.tint : Theme.selected, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .help("⌃\(index + 1)")
-            Image(systemName: session.agent.symbolName)
+            Image(symbol: session.agent.symbolName)
                 .font(.system(size: 10.5))
                 .foregroundStyle(session.agent.tint)
             Text(session.title)
@@ -501,7 +507,7 @@ private struct EmptyPane: View {
                             model.open(session.id, inPane: index)
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: session.agent.symbolName)
+                                Image(symbol: session.agent.symbolName)
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(session.agent.tint)
                                     .frame(width: 14)
@@ -549,8 +555,9 @@ struct BranchChip: View {
     let project: Project
 
     var body: some View {
-        let current = model.branch(of: project)
-        let moved = session.branch != nil && current != nil && session.branch != current
+        // A worktree session has a branch of its own, whatever the main folder is on.
+        let current = session.worktreeBranch ?? model.branch(of: project)
+        let moved = session.worktreeBranch == nil && session.branch != nil && current != nil && session.branch != current
         if current != nil || session.branch != nil {
             HStack(spacing: 5) {
                 Image(systemName: moved ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
@@ -573,6 +580,9 @@ struct BranchChip: View {
 
     private func tooltip(current: String?, moved: Bool) -> String {
         var lines: [String] = []
+        if let worktree = session.worktree {
+            lines.append("Works in its own worktree, \(worktree)")
+        }
         if moved, let last = session.branch, let current {
             lines.append("This session last worked on \(last); the repository is now on \(current).")
         }
@@ -587,6 +597,7 @@ struct BranchChip: View {
 
 struct AppearanceMenu: View {
     @AppStorage(Appearance.key) private var appearance = Appearance.system
+    @AppStorage(AppSettings.fullWidthChatKey) private var fullWidthChat = true
 
     var body: some View {
         Picker(selection: $appearance) {
@@ -597,12 +608,16 @@ struct AppearanceMenu: View {
             Label("Appearance", systemImage: "circle.lefthalf.filled")
         }
         .onChange(of: appearance) { appearance.apply() }
+        Toggle(isOn: $fullWidthChat) {
+            Label("Full-Width Chat", systemImage: "arrow.left.and.right")
+        }
     }
 }
 
 // MARK: - Transcript
 
 struct TranscriptView: View {
+    @AppStorage(AppSettings.fullWidthChatKey) private var fullWidthChat = true
     let session: ChatSession
     let isRunning: Bool
     @Binding var draft: String
@@ -626,7 +641,7 @@ struct TranscriptView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
-                .frame(maxWidth: Theme.columnWidth + 48)
+                .frame(maxWidth: Theme.chatMaxWidth(fullWidth: fullWidthChat))
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
@@ -784,7 +799,7 @@ private struct EmptySession: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: agent.symbolName)
+            Image(symbol: agent.symbolName)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(agent.tint)
                 .frame(width: 36, height: 36)

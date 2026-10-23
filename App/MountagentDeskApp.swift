@@ -1,7 +1,25 @@
 import MountagentDeskKit
 import SwiftUI
+import UserNotifications
 
+/// Starts the app, or, when an agent calls `mountagent-server`, runs that helper and exits
+/// before any window or Dock icon appears.
 @main
+enum Launcher {
+    @MainActor
+    static func main() {
+        let arguments = CommandLine.arguments.dropFirst()
+        if arguments.first == ServerHelper.flag {
+            exit(ServerHelper.run(Array(arguments.dropFirst())))
+        }
+        // Started by ssh as its askpass: the only argument is the prompt.
+        if ProcessInfo.processInfo.environment[ServerPasswords.askpassVariable] != nil {
+            exit(ServerHelper.run(Array(arguments)))
+        }
+        MountagentDeskApp.main()
+    }
+}
+
 struct MountagentDeskApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var model = AppModel()
@@ -28,6 +46,10 @@ struct MountagentDeskApp: App {
                 Button("Add Project…") { model.chooseProjectFolder() }
                     .keyboardShortcut("o")
             }
+            CommandGroup(replacing: .importExport) {
+                Button("Back Up Data…") { DataBackup.backUp(model) }
+                Button("Restore from Backup…") { DataBackup.restore(model) }
+            }
             CommandGroup(replacing: .sidebar) {
                 Button("Toggle Sidebar") {
                     NotificationCenter.default.post(name: .toggleSidebar, object: nil)
@@ -40,6 +62,10 @@ struct MountagentDeskApp: App {
                 GitCommands(model: model)
             }
             CommandMenu("Session") {
+                Button("Go to Session…") { model.showsSwitcher = true }
+                    .keyboardShortcut("k")
+                    .disabled(model.sessions.isEmpty)
+                Divider()
                 Button("Stop Agent") {
                     if let id = model.selectedSessionID { model.stop(id) }
                 }
@@ -69,11 +95,13 @@ struct MountagentDeskApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var model: AppModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Appearance.current.apply()
+        UNUserNotificationCenter.current().delegate = self
         Notifier.requestAuthorization()
         #if DEBUG
         DebugHooks.run { [weak self] in self?.model }
@@ -84,9 +112,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    /// Quitting (or closing the window) while agents work asks first: it stops them mid-turn.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let working = model?.running.count ?? 0
+        guard working > 0 else { return .terminateNow }
+        let question = NSAlert()
+        question.messageText = working == 1 ? "An agent is still working" : "\(working) agents are still working"
+        question.informativeText = "Quitting stops \(working == 1 ? "it" : "them") mid-turn. What \(working == 1 ? "it has" : "they have") done so far is kept in the session."
+        question.addButton(withTitle: "Quit")
+        question.addButton(withTitle: "Cancel")
+        return question.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    /// A click on a notification opens its session.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let id = (response.notification.request.content.userInfo[Notifier.sessionKey] as? String).flatMap(UUID.init(uuidString:))
+        await MainActor.run { self.openSession(id) }
+    }
+
+    private func openSession(_ id: UUID?) {
+        guard let id, let model, model.sessions[id] != nil else { return }
+        model.selectedSessionID = id
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        model?.stopAll()
+        model?.interruptAll()
+        model?.finishWrites()
+        model?.stopHelperListener()
         TerminalStore.shared.terminateAll()
+        ServerTerminals.shared.terminateAll()
     }
 }
 

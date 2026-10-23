@@ -241,7 +241,7 @@ enum Palette {
     /// Inline code: a faint rose wash with rose text, so paths and identifiers stand out.
     static let inlineCode = dynamic(light: NSColor(hex: 0xB4365A, alpha: 0.07), dark: NSColor(hex: 0xF06595, alpha: 0.10))
     static let inlineCodeText = dynamic(light: NSColor(hex: 0xB4365A), dark: NSColor(hex: 0xF0A0B8))
-    static let codeBackground = dynamic(light: NSColor(hex: Theme.Hex.sidebarLight), dark: NSColor(hex: Theme.Hex.sidebarDark))
+    static let codeBackground = NSColor.surface(light: Theme.Hex.sidebarLight, dark: Theme.Hex.sidebarBlack, dim: Theme.Hex.sidebarDim)
     static let accent = dynamic(light: NSColor(hex: Theme.Hex.accentLight), dark: NSColor(hex: Theme.Hex.accentDark))
     static let selection = dynamic(light: NSColor(hex: Theme.Hex.accentLight, alpha: 0.22), dark: NSColor(hex: Theme.Hex.accentDark, alpha: 0.30))
 }

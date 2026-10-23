@@ -118,7 +118,9 @@ public struct AgentRunner: Sendable {
         process.executableURL = executable
         process.arguments = invocation.arguments
         process.currentDirectoryURL = request.workingDirectory
-        process.environment = ExecutableLocator.environment.merging(invocation.environment) { _, new in new }
+        process.environment = ExecutableLocator.environment
+            .merging(invocation.environment) { _, new in new }
+            .merging(request.environment) { _, new in new }
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -272,20 +274,32 @@ public struct AgentRunner: Sendable {
 /// Splits a byte stream into UTF-8 lines without breaking multi-byte characters.
 struct LineBuffer {
     private var pending = Data()
+    /// How many bytes at the start of `pending` are known to hold no newline, so a long line
+    /// arriving in many chunks is searched once, not from the start for every chunk.
+    private var searched = 0
 
     mutating func append(_ data: Data) -> [String] {
         pending.append(data)
         var lines: [String] = []
-        while let newline = pending.firstIndex(of: 0x0A) {
-            let line = pending[pending.startIndex..<newline]
-            pending.removeSubrange(pending.startIndex...newline)
+        var start = pending.startIndex
+        var from = pending.startIndex + searched
+        while let newline = pending[from...].firstIndex(of: 0x0A) {
+            let line = pending[start..<newline]
             if !line.isEmpty { lines.append(String(decoding: line, as: UTF8.self)) }
+            start = newline + 1
+            from = start
         }
+        // Consumed lines go in one move, not one per line.
+        if start > pending.startIndex { pending = Data(pending[start...]) }
+        searched = pending.count
         return lines
     }
 
     mutating func flush() -> String? {
-        defer { pending.removeAll() }
+        defer {
+            pending.removeAll()
+            searched = 0
+        }
         return pending.isEmpty ? nil : String(decoding: pending, as: UTF8.self)
     }
 }

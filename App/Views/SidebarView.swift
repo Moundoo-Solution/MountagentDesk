@@ -86,8 +86,12 @@ struct SidebarView: View {
                             newTitle = session.title
                             renaming = session
                         },
-                        delete: { model.delete(session.id) }
+                        delete: { model.confirmDelete(session.id) }
                     )
+                }
+                let archived = model.archivedSessions(of: project.id)
+                if !archived.isEmpty {
+                    ArchivedSessions(sessions: archived)
                 }
                 if sessions.isEmpty {
                     Text("No sessions")
@@ -145,13 +149,14 @@ private struct GroupTitle: View {
         HStack(spacing: 4) {
             Button(action: toggle) {
                 HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(project.tint)
-                        .frame(width: 7, height: 7)
-                        .padding(.trailing, 3)
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(project.tint)
+                        .padding(.trailing, 2)
                     Text(project.name)
+                        .font(.system(size: 12.5, weight: .semibold))
                         .lineLimit(1)
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.textPrimary)
                     if !project.additionalPaths.isEmpty {
                         Text("+\(project.additionalPaths.count)")
                     }
@@ -175,6 +180,9 @@ private struct GroupTitle: View {
 
             Group {
                 Menu {
+                    Button("New Session in Own Worktree") { model.newSessionInWorktree(in: project) }
+                        .help("A new branch and working copy next to the repository, so this session's agent doesn't edit the files other sessions work on")
+                    Divider()
                     Button("Folders & Name…") { model.foldersProject = project }
                     Button("Rules & Skills…") { model.contextProject = project }
                     Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([project.url]) }
@@ -182,7 +190,12 @@ private struct GroupTitle: View {
                         Button("Open in Cursor") { CursorApp.open([project.url]) }
                     }
                     Divider()
-                    Button("Remove Project", role: .destructive) { model.removeProject(project) }
+                    Section("Last 30 days") {
+                        Text(model.usageSummary(of: project) ?? "No turns yet")
+                        Button("Export Usage as CSV…") { model.exportUsageCSV() }
+                    }
+                    Divider()
+                    Button("Remove Project…", role: .destructive) { model.confirmRemove(project) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .frame(width: 18, height: 18)
@@ -195,7 +208,7 @@ private struct GroupTitle: View {
                         Button {
                             model.newSession(in: project, agent: agent)
                         } label: {
-                            Label("New \(agent.displayName) Session", systemImage: agent.symbolName)
+                            Label { Text("New \(agent.displayName) Session") } icon: { Image(symbol: agent.symbolName) }
                         }
                     }
                 } label: {
@@ -222,6 +235,8 @@ private struct GroupTitle: View {
 }
 
 private struct SessionCell: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let session: ChatSession
     /// The project's color: the selected cell is washed with it and carries a bar.
     let tint: Color
@@ -248,7 +263,7 @@ private struct SessionCell: View {
                     .lineLimit(1)
                     .mask(fadeMask)
                 if let branch = session.branch {
-                    let moved = currentBranch != nil && currentBranch != branch
+                    let moved = session.worktree == nil && currentBranch != nil && currentBranch != branch
                     HStack(spacing: 3) {
                         Image(systemName: moved ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
                             .font(.system(size: 8, weight: .semibold))
@@ -292,7 +307,7 @@ private struct SessionCell: View {
         .onTapGesture(perform: select)
         .draggable(session.id.uuidString) {
             // Drop it on a pane to open it there.
-            Label(session.title, systemImage: session.agent.symbolName)
+            Label { Text(session.title) } icon: { Image(symbol: session.agent.symbolName) }
                 .font(Theme.Font.ui)
                 .padding(6)
                 .background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.row))
@@ -300,6 +315,16 @@ private struct SessionCell: View {
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Rename…", action: rename)
+            Button("Export as Markdown…") { model.exportMarkdown(session.id) }
+            Button("Archive") { model.setArchived(true, for: session.id) }
+                .disabled(isRunning)
+            if let worktree = session.worktree {
+                Divider()
+                Button("Open Worktree in Git Window") { openWindow(id: "git", value: worktree) }
+                Button("Reveal Worktree in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: worktree)]) }
+                Button("Remove Worktree…") { model.removeWorktree(of: session.id) }
+                    .disabled(isRunning)
+            }
             Divider()
             Button("Delete Session", role: .destructive, action: delete)
         }
@@ -326,7 +351,7 @@ private struct SessionCell: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(Theme.warning)
         } else if isRunning {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(minimumInterval: Theme.animationInterval)) { context in
                 let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
                 Text("Working")
                     .font(.system(size: 10.5, weight: .semibold))
@@ -369,7 +394,7 @@ private struct SessionCell: View {
             WorkingSpinner(tint: session.agent.tint)
                 .help("\(session.agent.displayName) is working")
         } else {
-            Image(systemName: session.agent.symbolName)
+            Image(symbol: session.agent.symbolName)
                 .font(.system(size: 11))
                 .foregroundStyle(isSelected ? session.agent.tint : session.agent.tint.opacity(0.75))
                 .help(session.agent.displayName)
@@ -384,7 +409,7 @@ private struct WorkingSpinner: View {
     let tint: Color
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(minimumInterval: Theme.animationInterval)) { context in
             let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9
             ZStack {
                 Circle().stroke(tint.opacity(0.2), lineWidth: 1.8)
@@ -438,7 +463,7 @@ private struct AccountUsageSection: View {
             if expanded {
                 ForEach(Array(model.agentChoices.enumerated()), id: \.element) { index, kind in
                     agentHeader(kind)
-                        .padding(.top, index == 0 ? 0 : 4)
+                        .padding(.top, index == 0 ? 0 : 8)
                     usage(for: kind)
                 }
             }
@@ -468,27 +493,29 @@ private struct AccountUsageSection: View {
                 }
             case .cursor:
                 CursorUsageMeters()
-            case .codex, .antigravity:
+            case .codex, .antigravity, .copilot:
                 // Their CLIs don't report plan limits; show what went through Mountagent Desk today.
                 let today = model.ledger.total(for: kind, lastDays: 1)
-                Text(today.turns == 0 ? "No turns today" : "Today: \(today.turns) turn\(today.turns == 1 ? "" : "s") · \(today.totalTokens.formatted(.number.notation(.compactName))) tokens")
+                // Copilot reports premium requests, not tokens.
+                let tokens = today.totalTokens == 0 ? "" : " · \(today.totalTokens.formatted(.number.notation(.compactName))) tokens"
+                Text(today.turns == 0 ? "No turns today" : "Today: \(today.turns) turn\(today.turns == 1 ? "" : "s")" + tokens)
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.textTertiary)
             }
         }
     }
 
-    /// "CLAUDE · you@… · Team"
+    /// "Claude · you@… · Team"
     private func agentHeader(_ kind: AgentKind) -> some View {
         let account = model.account(kind)
-        return HStack(spacing: 5) {
-            Image(systemName: kind.symbolName)
-                .font(.system(size: 9, weight: .semibold))
+        return HStack(spacing: 6) {
+            Image(symbol: kind.symbolName)
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(kind.tint)
-            Text(kind.shortName.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.4)
-                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 14)
+            Text(kind.shortName)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 6)
             Text([account?.email, account?.plan].compactMap { $0 }.joined(separator: " · "))
                 .font(Theme.Font.caption)
@@ -545,6 +572,62 @@ private struct SidebarFooter: View {
         .frame(height: 40)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
+        }
+    }
+}
+
+/// A project's archived sessions, folded under its list: open one to bring it back.
+private struct ArchivedSessions: View {
+    @Environment(AppModel.self) private var model
+    let sessions: [ChatSession]
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Button {
+                withAnimation(.snappy(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Archived (\(sessions.count))")
+                    Spacer()
+                }
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                ForEach(sessions) { session in
+                    HStack(spacing: 6) {
+                        Image(symbol: session.agent.symbolName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textTertiary)
+                        Text(session.title)
+                            .font(Theme.Font.ui)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.setArchived(false, for: session.id)
+                        model.selectedSessionID = session.id
+                    }
+                    .help("Unarchive and open")
+                    .contextMenu {
+                        Button("Unarchive") { model.setArchived(false, for: session.id) }
+                        Button("Export as Markdown…") { model.exportMarkdown(session.id) }
+                        Divider()
+                        Button("Delete Session", role: .destructive) { model.confirmDelete(session.id) }
+                    }
+                }
+            }
         }
     }
 }
