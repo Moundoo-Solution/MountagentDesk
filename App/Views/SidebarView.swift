@@ -547,7 +547,7 @@ private struct AccountUsageSection: View {
                         Text(note).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                     }
                 }
-            case .codex, .antigravity, .copilot:
+            case .codex, .antigravity, .copilot, .gemini, .opencode:
                 // Their CLIs don't report plan limits; show what went through Mountagent Desk today.
                 let today = model.ledger.total(for: kind, lastDays: 1)
                 // Copilot reports premium requests, not tokens.

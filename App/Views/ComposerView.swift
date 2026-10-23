@@ -365,7 +365,7 @@ struct ComposerView: View {
             }
             .chipMenu()
             .help("Model")
-        case .codex, .antigravity, .copilot:
+        case .codex, .antigravity, .copilot, .gemini, .opencode:
             let models = model.models(for: session.agent)
             Menu {
                 Picker("Model", selection: Binding(get: { session.model }, set: { model.setModel($0, for: session.id) })) {
@@ -380,6 +380,9 @@ struct ComposerView: View {
                 } else if session.agent == .copilot {
                     Divider()
                     Button("Reload Copilot Models") { model.refreshCopilotModels() }
+                } else if session.agent == .opencode {
+                    Divider()
+                    Button("Reload OpenCode Models") { model.refreshOpenCodeModels() }
                 }
             } label: {
                 ChipLabel(title: models.first { $0.id == session.model }?.name ?? session.model ?? models.first?.name ?? "Default")
@@ -436,6 +439,9 @@ struct ComposerView: View {
                 .chipMenu()
                 .help("Reasoning effort and speed")
             }
+        case .gemini, .opencode:
+            // No effort option in their CLIs.
+            EmptyView()
         }
     }
 

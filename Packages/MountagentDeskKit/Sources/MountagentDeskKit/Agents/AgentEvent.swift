@@ -48,6 +48,13 @@ public struct TurnResult: Equatable, Codable, Sendable {
 /// so a fresh one is made for every run.
 public protocol AgentStreamParser: Sendable {
     mutating func parse(line: String) -> [AgentEvent]
+    /// After the last line, when no `completed` came: for CLIs whose turn ends with the
+    /// process rather than with a closing line.
+    mutating func finish(exitStatus: Int32) -> [AgentEvent]
+}
+
+extension AgentStreamParser {
+    public mutating func finish(exitStatus: Int32) -> [AgentEvent] { [] }
 }
 
 /// Everything needed to start one turn.
@@ -175,6 +182,8 @@ public enum AgentProviders {
         case .codex: CodexProvider()
         case .antigravity: AntigravityProvider()
         case .copilot: CopilotProvider()
+        case .gemini: GeminiProvider()
+        case .opencode: OpenCodeProvider()
         }
     }
 }

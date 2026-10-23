@@ -110,6 +110,8 @@ enum Theme {
     static let codex = Color(light: 0x0E8A6A, dark: 0x3CC79F)
     static let antigravity = Color(light: 0x6B4FD8, dark: 0xA28BFF)
     static let copilot = Color(light: 0xBF3989, dark: 0xDB61A2)
+    static let gemini = Color(light: 0x1A73E8, dark: 0x6EA8FE)
+    static let opencode = Color(light: 0x8A6A12, dark: 0xE0B341)
 
     // Layout
     /// Frame interval of the "working" animations: 30 fps looks the same as the display's
@@ -218,6 +220,8 @@ extension AgentKind {
         case .codex: "hexagon"
         case .antigravity: "atom"
         case .copilot: "copilot"
+        case .gemini: "sparkles"
+        case .opencode: "chevron.left.forwardslash.chevron.right"
         }
     }
 
@@ -228,6 +232,8 @@ extension AgentKind {
         case .codex: Theme.codex
         case .antigravity: Theme.antigravity
         case .copilot: Theme.copilot
+        case .gemini: Theme.gemini
+        case .opencode: Theme.opencode
         }
     }
 
@@ -238,6 +244,8 @@ extension AgentKind {
         case .codex: "Codex"
         case .antigravity: "Antigravity"
         case .copilot: "Copilot"
+        case .gemini: "Gemini"
+        case .opencode: "OpenCode"
         }
     }
 }

@@ -9,14 +9,20 @@ func fixtureLines(_ name: String) throws -> [String] {
 }
 
 /// Feeds recorded lines through a parser into a fresh session, as the app does.
-func replay(_ lines: [String], parser: some AgentStreamParser, agent: AgentKind) -> (ChatSession, TranscriptReducer) {
+/// The process then exits with `exitStatus`.
+func replay(_ lines: [String], parser: some AgentStreamParser, agent: AgentKind, exitStatus: Int32 = 0) -> (ChatSession, TranscriptReducer) {
     var parser = parser
     var reducer = TranscriptReducer(agent: agent)
     var session = ChatSession(projectID: UUID(), agent: agent)
+    var completed = false
     for line in lines {
         for event in parser.parse(line: line) {
+            if case .completed = event { completed = true }
             reducer.apply(event, to: &session)
         }
+    }
+    if !completed {
+        for event in parser.finish(exitStatus: exitStatus) { reducer.apply(event, to: &session) }
     }
     return (session, reducer)
 }

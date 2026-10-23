@@ -159,7 +159,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "default agent access permission notification notify plan read only full"
         case .appearance: "theme dark light mode color sidebar width"
-        case .agents: "claude cursor codex antigravity openai google enable disable on off account usage plan sign in login install update limit cost"
+        case .agents: "claude cursor codex antigravity gemini opencode copilot openai google enable disable on off account usage plan sign in login install update limit cost"
         case .voice: "microphone mic dictation speech language vietnamese english send"
         case .git: "github ssh key email name commit push identity avatar"
         case .servers: "server ssh live uat test production terminal log psql termius agent read only"

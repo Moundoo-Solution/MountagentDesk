@@ -137,6 +137,8 @@ final class AppModel {
     private(set) var codexModels: [CodexProvider.Model] = []
     /// Copilot's models, from `copilot help config`.
     private(set) var copilotModels = AgentKind.copilot.builtInModels
+    /// OpenCode's `provider/model`s, from `opencode models`.
+    private(set) var openCodeModels = AgentKind.opencode.builtInModels
     private(set) var checkingAccounts = false
     /// Claude's plan limits from `/usage`, refreshed in the background.
     private(set) var planUsage: PlanUsage?
@@ -209,6 +211,7 @@ final class AppModel {
         refreshCursorModels()
         refreshCodexModels()
         refreshCopilotModels()
+        refreshOpenCodeModels()
         prefetchGitHubToken()
         ledger = store.load(UsageLedger.self, named: "usage") ?? UsageLedger()
         planUsage = store.load(PlanUsage.self, named: "plan-usage")
@@ -378,10 +381,11 @@ final class AppModel {
 
     func models(for agent: AgentKind) -> [AgentModel] {
         switch agent {
-        case .claude, .antigravity: agent.builtInModels
+        case .claude, .antigravity, .gemini: agent.builtInModels
         case .cursor: cursorModels
         case .codex: agent.builtInModels + codexModels.map(\.model)
         case .copilot: copilotModels
+        case .opencode: openCodeModels
         }
     }
 
@@ -405,6 +409,7 @@ final class AppModel {
             refreshAccounts()
             if kind == .codex { refreshCodexModels() }
             if kind == .copilot { refreshCopilotModels() }
+            if kind == .opencode { refreshOpenCodeModels() }
         }
     }
 
@@ -416,7 +421,7 @@ final class AppModel {
         case .codex:
             codexModels.first { $0.model.id == session.models[.codex] }?.efforts
                 ?? codexModels.first?.efforts ?? ["low", "medium", "high", "xhigh"]
-        case .cursor: []
+        case .cursor, .gemini, .opencode: []
         }
     }
 
@@ -647,7 +652,7 @@ final class AppModel {
     func setEffort(_ effort: String?, fast: Bool? = nil, for sessionID: UUID) {
         guard let session = sessions[sessionID] else { return }
         switch session.agent {
-        case .claude, .codex, .antigravity, .copilot:
+        case .claude, .codex, .antigravity, .copilot, .gemini, .opencode:
             update(sessionID) { $0.efforts[session.agent] = effort }
         case .cursor:
             guard let family = cursorFamily(for: session) else { return }
@@ -1689,6 +1694,7 @@ final class AppModel {
         refreshCursorModels()
         refreshCodexModels()
         refreshCopilotModels()
+        refreshOpenCodeModels()
     }
 
     // MARK: Models
@@ -1761,6 +1767,17 @@ final class AppModel {
             let models = CopilotProvider.parseModels(output)
             guard models.count > 1 else { return }
             await MainActor.run { self.copilotModels = models }
+        }
+    }
+
+    func refreshOpenCodeModels() {
+        guard enabledAgents.contains(.opencode) else { return }
+        let runner = runner
+        Task.detached(priority: .utility) {
+            guard let output = try? runner.capture(.opencode, arguments: ["models"], timeout: 30) else { return }
+            let models = OpenCodeProvider.parseModels(output)
+            guard models.count > 1 else { return }
+            await MainActor.run { self.openCodeModels = models }
         }
     }
 

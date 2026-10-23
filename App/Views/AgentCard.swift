@@ -204,7 +204,7 @@ struct AgentCard: View {
                     ForEach(usage.notes, id: \.self) { Text($0).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                 }
             }
-        case .codex, .antigravity, .copilot:
+        case .codex, .antigravity, .copilot, .gemini, .opencode:
             HStack(spacing: 10) {
                 Image(systemName: "chart.bar.xaxis").foregroundStyle(Theme.textTertiary)
                 Text("\(kind.displayName)'s CLI doesn't report plan limits. Signed in with \(account?.authMethod ?? "an account").")

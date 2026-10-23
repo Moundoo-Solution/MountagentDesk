@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// What Mountagent Desk knows about an agent's CLI and the account it is signed in to.
 public struct AgentAccount: Equatable, Sendable {
@@ -91,8 +92,74 @@ public struct AccountProbe: Sendable {
                 account.authMethod = account.loggedIn ? "copilot login" : nil
             }
             account.plan = account.loggedIn ? "Copilot" : nil
+        case .gemini:
+            if let version = try? runner.capture(.gemini, arguments: ["--version"], timeout: 20) {
+                account.version = version.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").last.map(String.init)
+            }
+            account.authMethod = Self.geminiAuth()
+            account.loggedIn = account.authMethod != nil
+            account.plan = account.authMethod
+        case .opencode:
+            if let version = try? runner.capture(.opencode, arguments: ["--version"], timeout: 20) {
+                account.version = version.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").last.map(String.init)
+            }
+            let providers = Self.openCodeProviders()
+            account.loggedIn = !providers.isEmpty
+            account.authMethod = providers.isEmpty ? nil : providers.joined(separator: ", ")
+            account.plan = account.authMethod
         }
         return account
+    }
+
+    /// How Gemini CLI would sign in headless, or nil when it couldn't: an API key in the
+    /// environment, `~/.gemini/.env` or the keychain, a Google sign-in it saved, or the
+    /// Vertex AI / Cloud credentials chosen in its settings.
+    static func geminiAuth(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                           environment: [String: String] = ProcessInfo.processInfo.environment,
+                           inKeychain: (String) -> Bool = Self.keychainHasItem) -> String? {
+        let folder = home.appendingPathComponent(".gemini")
+        let keys = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+        if keys.contains(where: { environment[$0]?.isEmpty == false }) || inKeychain("gemini-cli-api-key") { return "Gemini API key" }
+        let dotenv = (try? String(contentsOf: folder.appendingPathComponent(".env"), encoding: .utf8)) ?? ""
+        let setInFile = dotenv.split(separator: "\n").contains { line in
+            var line = line.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("export ") { line = String(line.dropFirst("export ".count)) }
+            return keys.contains { line.hasPrefix($0 + "=") && line.count > $0.count + 1 }
+        }
+        if setInFile { return "Gemini API key" }
+        if FileManager.default.fileExists(atPath: folder.appendingPathComponent("oauth_creds.json").path) || inKeychain("gemini-cli-oauth") {
+            return "Google account"
+        }
+        let settings = (try? Data(contentsOf: folder.appendingPathComponent("settings.json"))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? JSONObject }
+        let selected = ((settings?["security"] as? JSONObject)?["auth"] as? JSONObject)?["selectedType"] as? String
+        return switch selected {
+        case "vertex-ai": "Vertex AI"
+        case "compute-default-credentials": "Cloud credentials"
+        default: nil
+        }
+    }
+
+    /// Whether the keychain has a password for `service`. Only its attributes are asked
+    /// for, so macOS doesn't prompt and the secret is never read.
+    static func keychainHasItem(service: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnAttributes as String: true,
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// The providers `opencode auth login` saved (their names only), in its data folder.
+    static func openCodeProviders(home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                                  environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        let data = environment["XDG_DATA_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".local/share")
+        let file = data.appendingPathComponent("opencode/auth.json")
+        guard let contents = try? Data(contentsOf: file),
+              let object = try? JSONSerialization.jsonObject(with: contents) as? JSONObject
+        else { return [] }
+        return object.keys.sorted()
     }
 
     /// `claude auth status` prints JSON: loggedIn, email, orgName, subscriptionType, authMethod.
@@ -144,6 +211,8 @@ public enum AgentSetup {
         // Google's installer: a checksummed Go binary into ~/.local/bin.
         case .antigravity: "curl -fsSL https://antigravity.google/cli/install.sh | bash"
         case .copilot: "npm install -g @github/copilot"
+        case .gemini: "npm install -g @google/gemini-cli"
+        case .opencode: "npm install -g opencode-ai"
         }
     }
 
@@ -154,6 +223,9 @@ public enum AgentSetup {
         return switch kind {
         case .claude: "\(cli) auth login"
         case .cursor, .codex, .copilot: "\(cli) login"
+        // Started bare, Gemini CLI asks how to sign in; OpenCode signs in per model provider.
+        case .gemini: cli
+        case .opencode: "\(cli) auth login"
         // `agy` has no login command: started bare, it signs in through the browser.
         case .antigravity: cli
         }
@@ -198,7 +270,8 @@ public enum AgentSetup {
         return switch kind {
         case .claude: "\(cli) auth logout"
         case .cursor, .codex: "\(cli) logout"
-        case .antigravity, .copilot: nil
+        case .antigravity, .copilot, .gemini: nil
+        case .opencode: "\(cli) auth logout"
         }
     }
 
@@ -208,6 +281,8 @@ public enum AgentSetup {
         return switch kind {
         case .claude, .cursor, .antigravity, .copilot: "\(cli) update"
         case .codex: viaBrew ? "brew upgrade --cask codex" : "npm install -g @openai/codex@latest"
+        case .gemini: "npm install -g @google/gemini-cli@latest"
+        case .opencode: "\(cli) upgrade"
         }
     }
 
@@ -219,6 +294,8 @@ public enum AgentSetup {
         case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
         case .antigravity: URL(string: "https://antigravity.google")!
         case .copilot: URL(string: "https://github.com/settings/billing/premium_requests_usage")!
+        case .gemini: URL(string: "https://aistudio.google.com/usage")!
+        case .opencode: URL(string: "https://opencode.ai/docs/providers/")!
         }
     }
 }

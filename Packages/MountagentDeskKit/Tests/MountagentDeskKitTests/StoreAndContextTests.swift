@@ -102,13 +102,13 @@ private func temporaryDirectory() throws -> URL {
 }
 
 @Suite struct SavedAgentTests {
-    /// Gemini CLI was an agent in earlier versions; its sessions and projects must still load.
+    /// Sessions with agents this version doesn't know must still load.
     @Test func readsAgentsEarlierVersionsSaved() throws {
         let json = #"{"id":"6F2C1E59-6B39-4C47-9F57-0B1D2C3D4E5F","projectID":"7F2C1E59-6B39-4C47-9F57-0B1D2C3D4E5F","title":"t","agent":"gemini","models":{"gemini":"pro","claude":"opus","someday":"x"},"agentSessionIDs":{"gemini":"g1"},"createdAt":0}"#
         let session = try JSONDecoder().decode(ChatSession.self, from: Data(json.utf8))
-        #expect(session.agent == .antigravity)
-        #expect(session.models == [.antigravity: "pro", .claude: "opus"], "an unknown agent's entry is dropped, not fatal")
-        #expect(session.agentSessionIDs[.antigravity] == "g1")
+        #expect(session.agent == .gemini)
+        #expect(session.models == [.gemini: "pro", .claude: "opus"], "an unknown agent's entry is dropped, not fatal")
+        #expect(session.agentSessionIDs[.gemini] == "g1")
         #expect(AgentKind(stored: "someday") == nil)
     }
 }

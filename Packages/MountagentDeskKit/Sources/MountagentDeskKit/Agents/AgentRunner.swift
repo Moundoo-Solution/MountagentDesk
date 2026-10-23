@@ -220,6 +220,12 @@ public struct AgentRunner: Sendable {
             process.waitUntilExit()
             stderrDone.wait()
 
+            if !sawCompletion, !run.wasCancelled, !run.wasAbandoned {
+                for event in parser.finish(exitStatus: process.terminationStatus) {
+                    if case .completed = event { sawCompletion = true }
+                    continuation.yield(event)
+                }
+            }
             if run.wasCancelled {
                 continuation.yield(.failure(AgentRun.stoppedMessage))
             } else if run.wasAbandoned {

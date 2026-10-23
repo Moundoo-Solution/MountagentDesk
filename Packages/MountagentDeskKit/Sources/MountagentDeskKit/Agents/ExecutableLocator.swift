@@ -33,7 +33,7 @@ public struct ExecutableLocator: Sendable {
         var directories = loginShellPath()
         directories += (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
         directories += [
-            "\(home)/.local/bin", "\(home)/.claude/local", "\(home)/.cursor/bin", "\(home)/bin",
+            "\(home)/.local/bin", "\(home)/.claude/local", "\(home)/.cursor/bin", "\(home)/.opencode/bin", "\(home)/bin",
             "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
         ]
         var seen = Set<String>()

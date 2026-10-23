@@ -116,3 +116,108 @@ import Testing
         #expect(AgentSetup.logoutCommand(for: .antigravity, executable: nil) == nil, "agy has no sign-out command")
     }
 }
+
+/// Neither CLI could run here, so their fixtures are written from each CLI's own output
+/// code: Gemini CLI's `JsonStreamEventType` events and OpenCode's `run --format json`.
+@Suite struct GeminiProviderTests {
+    @Test func replaysATurnWithADeniedCommand() throws {
+        let (session, reducer) = replay(try fixtureLines("gemini-edit"), parser: GeminiStreamParser(), agent: .gemini)
+        #expect(session.agentSessionIDs[.gemini] == "4b7f0c52-9a1e-4d7b-8f61-2c3d4e5f6a7b")
+        let tools = session.items.filter { $0.kind == .tool }
+        #expect(tools.map(\.text) == ["/tmp/fixture/README.md", "rm -rf build"])
+        #expect(tools.first?.toolStatus == .succeeded)
+        #expect(tools.last?.toolStatus == .failed)
+        #expect(tools.last?.toolOutput == "Tool execution denied by policy.")
+        let texts = session.items.filter { $0.kind == .assistant }.map(\.text)
+        #expect(texts == ["Reading the file first.", "Added the line."])
+        #expect(reducer.lastResult?.isError == false)
+        #expect(reducer.lastResult?.inputTokens == 12000 && reducer.lastResult?.outputTokens == 400)
+        #expect(reducer.lastResult?.durationMs == 3100)
+    }
+
+    @Test func reportsAFailedRun() throws {
+        var parser = GeminiStreamParser()
+        let events = parser.parse(line: #"{"type":"result","status":"error","error":{"type":"FatalAuthenticationError","message":"Please set an Auth method"},"stats":{}}"#)
+        #expect(events == [.completed(TurnResult(isError: true, text: "Please set an Auth method"))])
+        // As a bad API key reported it.
+        let nested = try #require(JSONLine.object(#"{"message":"[API Error: {\"error\":{\"message\":\"{\\n  \\\"error\\\": {\\n    \\\"code\\\": 400,\\n    \\\"message\\\": \\\"API key not valid. Please pass a valid API key.\\\",\\n  }\\n}\"}}]"}"#)?["message"] as? String)
+        #expect(GeminiStreamParser.readable(nested) == "API key not valid. Please pass a valid API key.")
+        #expect(GeminiStreamParser.readable("Quota exceeded") == "Quota exceeded")
+    }
+
+    @Test func buildsArguments() {
+        var request = AgentRunRequest(prompt: "-fix it", workingDirectory: URL(fileURLWithPath: "/repo"),
+                                      additionalDirectories: [URL(fileURLWithPath: "/other")],
+                                      model: "gemini-3.1-pro-preview", access: .editFiles, resumeSessionID: nil)
+        let first = GeminiProvider().invocation(for: request)
+        #expect(first.arguments.contains("auto_edit"))
+        #expect(first.arguments.contains("/other"))
+        #expect(first.arguments.last == "--prompt=-fix it", "joined to the option, so a leading dash is safe")
+        request.resumeSessionID = "abc"
+        request.access = .readOnly
+        let next = GeminiProvider().invocation(for: request)
+        #expect(next.arguments.contains("plan"))
+        #expect(next.arguments.firstIndex(of: "--resume").map { next.arguments[$0 + 1] } == "abc")
+    }
+
+    @Test func findsHowItSignsIn() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("gemini-\(UUID().uuidString)")
+        let folder = home.appendingPathComponent(".gemini")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        func auth(_ environment: [String: String] = [:], keychain: Set<String> = []) -> String? {
+            AccountProbe.geminiAuth(home: home, environment: environment, inKeychain: keychain.contains)
+        }
+        #expect(auth() == nil)
+        #expect(auth(["GEMINI_API_KEY": "k"]) == "Gemini API key")
+        #expect(auth(keychain: ["gemini-cli-api-key"]) == "Gemini API key")
+        #expect(auth(keychain: ["gemini-cli-oauth"]) == "Google account")
+        try "GEMINI_API_KEY=\n".write(to: folder.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+        #expect(auth() == nil, "an empty key signs nobody in")
+        try "export GEMINI_API_KEY=k\n".write(to: folder.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+        #expect(auth() == "Gemini API key")
+    }
+}
+
+@Suite struct OpenCodeProviderTests {
+    @Test func replaysATurnAndEndsItWithTheProcess() throws {
+        let (session, reducer) = replay(try fixtureLines("opencode-edit"), parser: OpenCodeStreamParser(), agent: .opencode)
+        #expect(session.agentSessionIDs[.opencode] == "ses_5f2a9c1e7ffeA1b2C3d4E5f6")
+        #expect(session.items.contains { $0.kind == .thinking })
+        let tools = session.items.filter { $0.kind == .tool }
+        #expect(tools.map(\.text) == ["/tmp/fixture/README.md", "git push"])
+        #expect(tools.last?.toolStatus == .failed)
+        #expect(session.items.last { $0.kind == .assistant }?.text == "README.md has one heading. I didn't push.")
+        let result = try #require(reducer.lastResult)
+        #expect(!result.isError)
+        #expect(result.inputTokens == 9000 + 2000 + 500 + 1000 + 9000)
+        #expect(result.outputTokens == 120 + 30 + 50)
+        #expect(abs((result.costUSD ?? 0) - 0.02) < 1e-9)
+        #expect(result.durationMs == 2600)
+    }
+
+    @Test func aFailedExitIsAnError() throws {
+        let lines = [#"{"type":"error","timestamp":1,"sessionID":"ses_1","error":{"name":"ProviderAuthError","data":{"message":"No API key for anthropic"}}}"#]
+        let (_, reducer) = replay(lines, parser: OpenCodeStreamParser(), agent: .opencode, exitStatus: 1)
+        #expect(reducer.lastResult?.isError == true)
+        #expect(reducer.lastResult?.text == "No API key for anthropic")
+        // Nothing on stdout: the runner reports the exit itself.
+        var parser = OpenCodeStreamParser()
+        #expect(parser.finish(exitStatus: 1).isEmpty)
+    }
+
+    @Test func buildsArguments() {
+        var request = AgentRunRequest(prompt: "say \"hi\" to me", workingDirectory: URL(fileURLWithPath: "/repo"),
+                                      model: "anthropic/claude-sonnet-5-5", access: .readOnly, resumeSessionID: nil)
+        let first = OpenCodeProvider().invocation(for: request)
+        #expect(first.arguments.prefix(3) == ["run", "--format", "json"])
+        #expect(first.arguments.contains("plan"))
+        #expect(first.stdin == "say \"hi\" to me", "on stdin, so it isn't re-quoted")
+        request.resumeSessionID = "ses_1"
+        request.access = .fullAccess
+        let next = OpenCodeProvider().invocation(for: request)
+        #expect(next.arguments.contains("--auto") && !next.arguments.contains("plan"))
+        #expect(next.arguments.suffix(2) == ["--session", "ses_1"])
+        #expect(OpenCodeProvider.parseModels("anthropic/claude-sonnet-5-5\nopenai/gpt-6-luna\n").map(\.id) == [nil, "anthropic/claude-sonnet-5-5", "openai/gpt-6-luna"])
+    }
+}
