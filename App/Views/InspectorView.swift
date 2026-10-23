@@ -57,7 +57,7 @@ struct InspectorView: View {
                     header(tool)
                     Group {
                         switch tool {
-                        case .changes: ChangesPanel(project: project, state: changes)
+                        case .changes: ChangesPanel(project: project, state: changes, sessionID: sessionID)
                         case .git: GitPanel(project: project)
                         case .terminal: TerminalPanel(project: project)
                         case .servers: ServersPanel(project: project)
@@ -215,12 +215,66 @@ final class ChangesState {
 }
 
 private struct ChangesPanel: View {
+    @Environment(AppModel.self) private var model
     let project: Project
     let state: ChangesState
+    let sessionID: UUID
     @State private var selected: (folder: String, change: GitInspector.FileChange)?
     @State private var diff = ""
 
     var body: some View {
+        VStack(spacing: 0) {
+            content
+            if let comments = model.reviewComments[sessionID], !comments.isEmpty {
+                reviewBar(comments)
+            }
+        }
+        #if DEBUG
+        // `MOUNTAGENT_OPEN_CHANGE=<path>` opens that file's diff, for snapshots, with
+        // `MOUNTAGENT_REVIEW_NOTE` as a comment on its line 2.
+        .onChange(of: state.repos.count) { _, _ in
+            guard selected == nil, let path = ProcessInfo.processInfo.environment["MOUNTAGENT_OPEN_CHANGE"] else { return }
+            for repo in state.repos {
+                if let change = repo.summary.changes.first(where: { $0.path == path }) {
+                    selected = (repo.folder, change)
+                    if let note = ProcessInfo.processInfo.environment["MOUNTAGENT_REVIEW_NOTE"] {
+                        model.addReviewComment(.init(path: change.path, line: 2, removed: false, code: "", text: note), in: sessionID)
+                    }
+                }
+            }
+        }
+        #endif
+    }
+
+    /// The path the agent knows a file by: as in its repository, under the folder's name
+    /// for repositories other than the main folder.
+    private func agentPath(_ change: GitInspector.FileChange, in folder: String) -> String {
+        folder == project.path ? change.path : (folder as NSString).lastPathComponent + "/" + change.path
+    }
+
+    private func reviewBar(_ comments: [DiffReview.Comment]) -> some View {
+        let agent = model.sessions[sessionID]?.agent
+        return HStack(spacing: 8) {
+            Image(systemName: "text.bubble.fill").foregroundStyle(Theme.accent)
+            Text("\(comments.count) comment\(comments.count == 1 ? "" : "s")")
+                .font(Theme.Font.uiMedium)
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Button("Clear") { model.clearReview(in: sessionID) }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            Button("Send to \(agent?.shortName ?? "Agent")") { model.sendReview(in: sessionID) }
+                .controlSize(.small)
+                .help("One message with every comment, file by file")
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 38)
+        .background(Theme.elevated)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let selected {
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
@@ -242,7 +296,16 @@ private struct ChangesPanel: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                DiffView(diff: diff)
+                DiffView(
+                    diff: diff,
+                    comments: (model.reviewComments[sessionID] ?? []).filter { $0.path == agentPath(selected.change, in: selected.folder) },
+                    comment: { line, text in
+                        guard let number = line.newNumber ?? line.oldNumber else { return }
+                        model.addReviewComment(.init(path: agentPath(selected.change, in: selected.folder), line: number,
+                                                     removed: line.kind == .removed, code: line.text, text: text), in: sessionID)
+                    },
+                    remove: { model.removeReviewComment($0, in: sessionID) }
+                )
             }
             .task(id: selected.change.path) {
                 let root = URL(fileURLWithPath: selected.folder)
@@ -343,31 +406,130 @@ struct ChangeRow: View {
     }
 }
 
-/// A unified diff with added and removed lines tinted.
+/// A unified diff with added and removed lines tinted. With `comment`, hovering a line
+/// offers a comment on it; the comments left so far show under their lines.
 struct DiffView: View {
     let diff: String
+    var comments: [DiffReview.Comment] = []
+    var comment: ((DiffReview.Line, String) -> Void)?
+    var remove: (UUID) -> Void = { _ in }
+    @State private var hovered: Int?
+    @State private var editing: Int?
+    @State private var draft = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    Text(line.isEmpty ? " " : line)
-                        .font(Theme.Font.code)
-                        .foregroundStyle(foreground(line))
-                        .padding(.horizontal, 10)
-                        .frame(maxWidth: .infinity, minHeight: 17, alignment: .leading)
-                        .background(background(line))
+        let lines = DiffReview.lines(of: diff)
+        GeometryReader { geometry in
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        row(line, index: index)
+                            .frame(minWidth: geometry.size.width, alignment: .leading)
+                            .background(background(line.text))
+                        ForEach(comments.filter { matches($0, line) }) { note in
+                            noteRow(note)
+                                .frame(width: max(200, min(520, geometry.size.width - 40)))
+                        }
+                        if editing == index {
+                            editor(for: line)
+                                .frame(width: max(200, min(520, geometry.size.width - 40)))
+                        }
+                    }
                 }
+                .padding(.vertical, 6)
+                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .topLeading)
             }
-            .textSelection(.enabled)
-            .padding(.vertical, 6)
         }
         .background(Theme.codeBackground)
     }
 
-    /// Hunks only; git's file headers repeat what the panel header shows.
-    private var lines: [String] {
-        diff.components(separatedBy: "\n").drop { !$0.hasPrefix("@@") }.map { $0 }
+    private func row(_ line: DiffReview.Line, index: Int) -> some View {
+        HStack(spacing: 0) {
+            if comment != nil {
+                ZStack {
+                    if hovered == index, line.kind != .hunk {
+                        Button {
+                            draft = ""
+                            editing = index
+                            focused = true
+                        } label: {
+                            Image(systemName: "plus.bubble.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Comment on this line")
+                    }
+                }
+                .frame(width: 18)
+            }
+            Text(line.text.isEmpty ? " " : line.text)
+                .font(Theme.Font.code)
+                .foregroundStyle(foreground(line.text))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, comment == nil ? 10 : 2)
+        }
+        .frame(minHeight: 17, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside { hovered = index } else if hovered == index { hovered = nil }
+        }
+    }
+
+    private func matches(_ note: DiffReview.Comment, _ line: DiffReview.Line) -> Bool {
+        note.removed ? (line.kind == .removed && line.oldNumber == note.line) : (line.kind != .removed && line.newNumber == note.line)
+    }
+
+    private func noteRow(_ note: DiffReview.Comment) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "text.bubble").foregroundStyle(Theme.accent)
+            Text(note.text)
+                .foregroundStyle(Theme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button { remove(note.id) } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove this comment")
+        }
+        .font(Theme.Font.ui)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.elevated, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.stroke))
+        .padding(.leading, 20)
+        .padding(.vertical, 3)
+    }
+
+    private func editor(for line: DiffReview.Line) -> some View {
+        HStack(spacing: 6) {
+            TextField("Comment for the agent", text: $draft, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...5)
+                .focused($focused)
+                .onSubmit { add(line) }
+                .onExitCommand { editing = nil }
+            Button("Add") { add(line) }
+                .controlSize(.small)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel") { editing = nil }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+        }
+        .padding(.leading, 20)
+        .padding(.vertical, 4)
+    }
+
+    private func add(_ line: DiffReview.Line) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        comment?(line, text)
+        editing = nil
+        draft = ""
     }
 
     private func foreground(_ line: String) -> Color {

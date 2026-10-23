@@ -377,6 +377,29 @@ final class AppModel {
         running[sessionID] != nil || preparing.contains(sessionID) || settingUpWorktree.contains(sessionID)
     }
 
+    /// Comments left on the Changes panel's diffs, per session, until they're sent.
+    private(set) var reviewComments: [UUID: [DiffReview.Comment]] = [:]
+
+    func addReviewComment(_ comment: DiffReview.Comment, in sessionID: UUID) {
+        reviewComments[sessionID, default: []].append(comment)
+    }
+
+    func removeReviewComment(_ id: UUID, in sessionID: UUID) {
+        reviewComments[sessionID]?.removeAll { $0.id == id }
+        if reviewComments[sessionID]?.isEmpty == true { reviewComments[sessionID] = nil }
+    }
+
+    func clearReview(in sessionID: UUID) {
+        reviewComments[sessionID] = nil
+    }
+
+    /// Sends the comments to the session's agent as one message (queued if it's busy).
+    func sendReview(in sessionID: UUID) {
+        guard let comments = reviewComments[sessionID], !comments.isEmpty else { return }
+        submit(DiffReview.message(for: comments), attachments: [], images: [], in: sessionID)
+        reviewComments[sessionID] = nil
+    }
+
     /// Sessions whose new worktree is still running the project's setup script; messages
     /// sent meanwhile wait for it.
     private(set) var settingUpWorktree: Set<UUID> = []
@@ -1386,6 +1409,10 @@ final class AppModel {
     /// Agent access lives in the keychain; servers.json only mirrors it, so editing the file
     /// gives no agent access. The first launch after the move takes the file's flags once.
     private func applyAgentAccessFromKeychain() {
+        #if DEBUG
+        // A demo data folder: each rebuild is a new signature, and the keychain would ask.
+        if ProcessInfo.processInfo.environment["MOUNTAGENT_DATA_DIR"] != nil { return }
+        #endif
         // Sudo users only ever come from the keychain: none until the user sets some.
         let sudo = ServerPasswords.agentSudoUsers(root: store.root)
         for index in servers.indices { servers[index].agentSudoUsers = sudo[servers[index].id] ?? [] }
