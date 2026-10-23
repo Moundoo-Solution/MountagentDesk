@@ -13,6 +13,9 @@ public enum SessionActivity {
     }
 
     public static func line(for session: ChatSession, running: Bool) -> Line? {
+        if let command = session.command {
+            return Line(state: .finished, text: command.isEmpty ? "Shell" : "$ \(oneLine(command))")
+        }
         let items = session.items
         if let question = items.last(where: { $0.kind == .permission && $0.permissionState == .pending }) {
             return Line(state: .waiting, text: "Needs you: \(verb(question.toolName)) \(oneLine(question.text))")

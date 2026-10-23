@@ -68,6 +68,12 @@ struct MountagentDeskApp: App {
                 Button("Quick Launch…") { model.showsQuickLaunch = true }
                     .keyboardShortcut("t")
                     .disabled(model.projects.isEmpty)
+                Button("New Terminal Session…") {
+                    model.quickLaunchesTerminal = true
+                    model.showsQuickLaunch = true
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(model.projects.isEmpty)
                 Divider()
                 Button("Stop Agent") {
                     if let id = model.selectedSessionID { model.stop(id) }
@@ -145,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         model?.stopHelperListener()
         TerminalStore.shared.terminateAll()
         ServerTerminals.shared.terminateAll()
+        SessionTerminals.shared.terminateAll()
     }
 }
 

@@ -26,6 +26,9 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     /// project's main folder, and that copy's branch.
     public var worktree: String?
     public var worktreeBranch: String?
+    /// Set for a terminal session: the command it runs in its folder instead of an agent
+    /// (empty: the login shell).
+    public var command: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -61,6 +64,8 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
         set { efforts[agent] = newValue }
     }
 
+    public var isTerminal: Bool { command != nil }
+
     // Sessions saved by earlier versions lack the newer fields.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -79,6 +84,7 @@ public struct ChatSession: Codable, Identifiable, Hashable, Sendable {
         archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
         worktree = try container.decodeIfPresent(String.self, forKey: .worktree)
         worktreeBranch = try container.decodeIfPresent(String.self, forKey: .worktreeBranch)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }

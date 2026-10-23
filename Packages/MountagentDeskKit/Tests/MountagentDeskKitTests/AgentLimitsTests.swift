@@ -60,3 +60,23 @@ import Testing
         #expect(SessionActivity.line(for: session, running: false)?.state == .failed)
     }
 }
+
+@Suite struct TerminalSessionTests {
+    @Test func namesAndOffersCommands() {
+        #expect(TerminalCommands.title(for: "aider --model sonnet") == "aider")
+        #expect(TerminalCommands.title(for: "DEBUG=1 /opt/homebrew/bin/htop") == "htop")
+        #expect(TerminalCommands.title(for: "  ") == "Shell")
+        #expect(TerminalCommands.installed { $0 == "aider" || $0 == "claude" ? URL(fileURLWithPath: "/bin/\($0)") : nil } == ["claude", "aider"])
+    }
+
+    @Test func savesTheCommandAndShowsIt() throws {
+        var session = ChatSession(projectID: UUID(), agent: .claude)
+        #expect(!session.isTerminal)
+        session.command = "aider --yes"
+        let decoded = try JSONDecoder().decode(ChatSession.self, from: JSONEncoder().encode(session))
+        #expect(decoded.command == "aider --yes")
+        #expect(SessionActivity.line(for: decoded, running: false)?.text == "$ aider --yes")
+        session.command = ""
+        #expect(SessionActivity.line(for: session, running: false)?.text == "Shell")
+    }
+}

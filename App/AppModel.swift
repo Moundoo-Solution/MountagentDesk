@@ -52,15 +52,29 @@ final class AppModel {
     var showsSwitcher = false
     /// The ⌘T quick launch sheet is open.
     var showsQuickLaunch = false
+    /// It opens on a terminal session rather than an agent (⇧⌘T).
+    var quickLaunchesTerminal = false
 
     /// A new session of `agent` in `project`, or, with a branch, in a worktree on that
-    /// branch (checked out if it exists, else made from HEAD); `message` goes first.
-    func quickLaunch(in project: Project, agent: AgentKind, branch: String, message: String) {
+    /// branch (checked out if it exists, else made from HEAD); `message` goes first. With a
+    /// `command`, a terminal session running it instead.
+    func quickLaunch(in project: Project, agent: AgentKind, branch: String, message: String, command: String? = nil) {
         let name = branch.trimmingCharacters(in: .whitespaces)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        func begin(_ session: ChatSession) {
+            if let command {
+                let line = command.trimmingCharacters(in: .whitespacesAndNewlines)
+                update(session.id) {
+                    $0.command = line
+                    $0.title = TerminalCommands.title(for: line)
+                }
+                persist(session.id)
+            } else if !text.isEmpty {
+                send(text, attachments: [], in: session.id)
+            }
+        }
         guard !name.isEmpty else {
-            let session = newSession(in: project, agent: agent)
-            if !text.isEmpty { send(text, attachments: [], in: session.id) }
+            begin(newSession(in: project, agent: agent))
             return
         }
         let repository = project.url
@@ -80,7 +94,7 @@ final class AppModel {
                     $0.branch = created.branch
                 }
                 persist(session.id)
-                if !text.isEmpty { send(text, attachments: [], in: session.id) }
+                begin(session)
             } catch {
                 alert = "Couldn't make a worktree on \(name): \(error.localizedDescription)"
             }
@@ -299,6 +313,7 @@ final class AppModel {
         update(sessionID) { $0.archived = archived }
         persist(sessionID)
         if archived {
+            SessionTerminals.shared.stop(sessionID)
             grid.remove(sessionID)
             if selectedSessionID == sessionID { selectedSessionID = nil }
         }
@@ -605,6 +620,7 @@ final class AppModel {
     func delete(_ sessionID: UUID) {
         guard let session = sessions[sessionID] else { return }
         running[sessionID]?.cancel()
+        SessionTerminals.shared.stop(sessionID)
         sessions[sessionID] = nil
         drafts[sessionID] = nil
         queued[sessionID] = nil

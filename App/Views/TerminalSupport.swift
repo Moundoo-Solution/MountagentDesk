@@ -289,7 +289,7 @@ final class ServerTerminals {
         let serverID = login.server.id
         view.onCommand = { [weak self] command in self?.onCommand?(serverID, command) }
         view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let watcher = Watcher { [weak self] in self?.disconnected(tabID) }
+        let watcher = Watcher { [weak self] _ in self?.disconnected(tabID) }
         watchers[tabID] = watcher
         view.processDelegate = watcher
         var environment = ExecutableLocator.environment
@@ -312,9 +312,9 @@ final class ServerTerminals {
     }
 
     final class Watcher: NSObject, LocalProcessTerminalViewDelegate {
-        let ended: @MainActor () -> Void
+        let ended: @MainActor (Int32?) -> Void
 
-        init(ended: @escaping @MainActor () -> Void) {
+        init(ended: @escaping @MainActor (Int32?) -> Void) {
             self.ended = ended
         }
 
@@ -324,7 +324,7 @@ final class ServerTerminals {
 
         func processTerminated(source: TerminalView, exitCode: Int32?) {
             let ended = ended
-            DispatchQueue.main.async { ended() }
+            DispatchQueue.main.async { ended(exitCode) }
         }
     }
 }
@@ -362,5 +362,76 @@ struct ServerTerminalHost: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         if let view = view as? LocalProcessTerminalView { TerminalShell.style(view, dark: dark, theme: theme) }
+    }
+}
+
+// MARK: - Terminal sessions
+
+/// The programs terminal sessions run, kept while the app runs so switching sessions or
+/// panes doesn't stop them. Started again when a session is first shown after a launch.
+@MainActor
+@Observable
+final class SessionTerminals {
+    static let shared = SessionTerminals()
+
+    /// Sessions whose program has ended, with its exit code when there was one.
+    private(set) var ended: [UUID: Int32?] = [:]
+    @ObservationIgnored private var views: [UUID: LocalProcessTerminalView] = [:]
+    @ObservationIgnored private var watchers: [UUID: ServerTerminals.Watcher] = [:]
+
+    func view(for sessionID: UUID, command: String, directory: String) -> LocalProcessTerminalView {
+        if let view = views[sessionID] { return view }
+        let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let watcher = ServerTerminals.Watcher { [weak self, weak view] code in
+            guard let self, let view, self.views[sessionID] === view else { return }
+            self.ended[sessionID] = .some(code)
+        }
+        view.processDelegate = watcher
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Interactive too (`-i`), so the program sees the aliases and keys set in .zshrc.
+        let arguments = trimmed.isEmpty ? ["-l"] : ["-l", "-i", "-c", trimmed]
+        TerminalShell.start(in: view, arguments: arguments, loginName: trimmed.isEmpty, directory: directory)
+        views[sessionID] = view
+        watchers[sessionID] = watcher
+        ended[sessionID] = nil
+        return view
+    }
+
+    func isRunning(_ sessionID: UUID) -> Bool {
+        views[sessionID] != nil && ended[sessionID] == nil
+    }
+
+    /// Ends the program; the next `view(for:)` starts it again.
+    func stop(_ sessionID: UUID) {
+        views.removeValue(forKey: sessionID)?.terminate()
+        watchers[sessionID] = nil
+        ended[sessionID] = nil
+    }
+
+    func terminateAll() {
+        views.values.forEach { $0.terminate() }
+        views.removeAll()
+        watchers.removeAll()
+    }
+}
+
+/// A terminal session's program.
+struct SessionTerminalHost: NSViewRepresentable {
+    let sessionID: UUID
+    let command: String
+    let directory: String
+    let dark: Bool
+    let theme: TerminalTheme
+
+    func makeNSView(context: Context) -> LocalProcessTerminalView {
+        let view = SessionTerminals.shared.view(for: sessionID, command: command, directory: directory)
+        TerminalShell.style(view, dark: dark, theme: theme)
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        return view
+    }
+
+    func updateNSView(_ view: LocalProcessTerminalView, context: Context) {
+        TerminalShell.style(view, dark: dark, theme: theme)
     }
 }

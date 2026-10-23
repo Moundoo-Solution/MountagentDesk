@@ -224,6 +224,12 @@ private struct GroupTitle: View {
                             Label { Text("New \(agent.displayName) Session") } icon: { Image(symbol: agent.symbolName) }
                         }
                     }
+                    Divider()
+                    Button {
+                        model.quickLaunch(in: project, agent: project.defaultAgent, branch: "", message: "", command: "")
+                    } label: {
+                        Label("New Terminal Session", systemImage: "terminal")
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .frame(width: 18, height: 18)
@@ -338,7 +344,7 @@ private struct SessionCell: View {
         .onTapGesture(perform: select)
         .draggable(session.id.uuidString) {
             // Drop it on a pane to open it there.
-            Label { Text(session.title) } icon: { Image(symbol: session.agent.symbolName) }
+            Label { Text(session.title) } icon: { Image(symbol: session.symbolName) }
                 .font(Theme.Font.ui)
                 .padding(6)
                 .background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.row))
@@ -433,6 +439,11 @@ private struct SessionCell: View {
         } else if isRunning {
             WorkingSpinner(tint: session.agent.tint)
                 .help("\(session.agent.displayName) is working")
+        } else if session.isTerminal {
+            Image(systemName: "terminal")
+                .font(.system(size: 10.5))
+                .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
+                .help("Terminal session")
         } else {
             Image(symbol: session.agent.symbolName)
                 .font(.system(size: 11))
@@ -657,7 +668,7 @@ private struct ArchivedSessions: View {
             if expanded {
                 ForEach(sessions) { session in
                     HStack(spacing: 6) {
-                        Image(symbol: session.agent.symbolName)
+                        Image(symbol: session.symbolName)
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.textTertiary)
                         Text(session.title)

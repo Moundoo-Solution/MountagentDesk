@@ -520,3 +520,8 @@ extension Date {
         }
     }
 }
+
+extension ChatSession {
+    /// The agent's mark, or a terminal for a terminal session.
+    var symbolName: String { isTerminal ? "terminal" : agent.symbolName }
+}

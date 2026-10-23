@@ -400,17 +400,73 @@ private struct SessionChat: View {
             if showsHeader {
                 PaneHeader(session: session, project: project, index: index, isActive: isActive)
             }
-            TranscriptView(session: session, isRunning: model.isRunning(session.id), draft: draft)
-                .environment(\.project, project)
-                .environment(\.sessionID, session.id)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    ComposerView(session: session, text: draft)
-                }
+            if let command = session.command, let project {
+                TerminalSessionView(session: session, command: command, directory: model.workRoot(of: session, project: project).path)
+            } else {
+                TranscriptView(session: session, isRunning: model.isRunning(session.id), draft: draft)
+                    .environment(\.project, project)
+                    .environment(\.sessionID, session.id)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        ComposerView(session: session, text: draft)
+                    }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .insertIntoComposer)) { note in
             guard isActive, let text = note.userInfo?["text"] as? String else { return }
             let current = draft.wrappedValue
             draft.wrappedValue = current + (current.isEmpty || current.hasSuffix(" ") ? "" : " ") + text + " "
+        }
+    }
+}
+
+/// A terminal session: its command running in the session's folder, with a strip saying
+/// what runs where and whether it has ended.
+private struct TerminalSessionView: View {
+    let session: ChatSession
+    let command: String
+    let directory: String
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(TerminalTheme.key) private var theme = TerminalTheme.app
+    @State private var generation = 0
+    private var terminals: SessionTerminals { .shared }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.textTertiary)
+                Text(command.isEmpty ? "Shell" : command)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text((directory as NSString).abbreviatingWithTildeInPath)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .layoutPriority(-1)
+                Spacer(minLength: 6)
+                if let code = terminals.ended[session.id] {
+                    Text(code.map { "Exited (\($0))" } ?? "Ended")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(code == 0 || code == nil ? Theme.textTertiary : Theme.danger)
+                }
+                ChromeButton(symbol: "arrow.counterclockwise", help: "Run it again") {
+                    terminals.stop(session.id)
+                    generation += 1
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .frame(height: 30)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+            SessionTerminalHost(sessionID: session.id, command: command, directory: directory, dark: colorScheme == .dark, theme: theme)
+                .id(generation)
+                .padding(.leading, 8)
+                .padding(.vertical, 4)
+                .background(theme.background(dark: colorScheme == .dark))
         }
     }
 }
@@ -433,9 +489,9 @@ private struct PaneHeader: View {
                 .frame(width: 15, height: 15)
                 .background(isActive ? session.agent.tint : Theme.selected, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .help("⌃\(index + 1)")
-            Image(symbol: session.agent.symbolName)
+            Image(symbol: session.symbolName)
                 .font(.system(size: 10.5))
-                .foregroundStyle(session.agent.tint)
+                .foregroundStyle(session.isTerminal ? Theme.textSecondary : session.agent.tint)
             Text(session.title)
                 .font(.system(size: 12, weight: isActive ? .semibold : .medium))
                 .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
@@ -507,9 +563,9 @@ private struct EmptyPane: View {
                             model.open(session.id, inPane: index)
                         } label: {
                             HStack(spacing: 8) {
-                                Image(symbol: session.agent.symbolName)
+                                Image(symbol: session.symbolName)
                                     .font(.system(size: 10.5))
-                                    .foregroundStyle(session.agent.tint)
+                                    .foregroundStyle(session.isTerminal ? Theme.textSecondary : session.agent.tint)
                                     .frame(width: 14)
                                 Text(session.title)
                                     .font(Theme.Font.ui)
