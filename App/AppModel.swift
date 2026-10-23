@@ -1680,6 +1680,11 @@ final class AppModel {
     }
 
     /// Installs the CLI if needed, then signs in through the browser.
+    /// Runs a terminal agent's installer in the setup terminal.
+    func install(_ agent: TerminalAgent, from host: SetupTask.Host = .main) {
+        setupTask = SetupTask(kind: nil, title: "Install \(agent.name)", command: agent.install, host: host, symbolName: agent.symbolName)
+    }
+
     func setUp(_ kind: AgentKind, from host: SetupTask.Host = .main) {
         let account = accounts[kind]
         if account?.isInstalled == true {

@@ -159,7 +159,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "default agent access permission notification notify plan read only full"
         case .appearance: "theme dark light mode color sidebar width"
-        case .agents: "claude cursor codex antigravity gemini opencode copilot openai google enable disable on off account usage plan sign in login install update limit cost"
+        case .agents: "claude cursor codex antigravity gemini opencode copilot kiro amp kimi grok mistral vibe droid terminal openai google enable disable on off account usage plan sign in login install update limit cost"
         case .voice: "microphone mic dictation speech language vietnamese english send"
         case .git: "github ssh key email name commit push identity avatar"
         case .servers: "server ssh live uat test production terminal log psql termius agent read only"
@@ -570,6 +570,38 @@ private struct AgentsPane: View {
             AgentCard(kind: kind)
         }
         .onAppear { model.refreshPlanUsage() }
+        TerminalAgentsSection()
+    }
+}
+
+/// Agents that run in their own terminal interface, as in SpaceVibe Deck: started from a
+/// project's + menu or Quick Launch, installed here with the vendor's own command.
+private struct TerminalAgentsSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var installed: Set<String> = []
+
+    var body: some View {
+        SettingsSection(title: "Terminal agents", footer: "These run in their own interface in a terminal session, so the app shows their screen rather than a transcript: no approvals, usage or cost here. Later runs pick up the folder's last conversation where the CLI can (Kiro, Droid).") {
+            ForEach(Array(TerminalCommands.agents.enumerated()), id: \.element.id) { index, agent in
+                SettingsRow(title: "\(agent.name) · \(agent.vendor)", detail: installed.contains(agent.name) ? agent.command : "Not installed · \(agent.install)", divider: index > 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: agent.symbolName).foregroundStyle(agent.tint)
+                        Link("Website", destination: agent.website)
+                            .font(Theme.Font.caption)
+                        if installed.contains(agent.name) {
+                            Text("Installed").font(Theme.Font.caption).foregroundStyle(Theme.success)
+                        } else {
+                            Button("Install…") { model.install(agent, from: .settings) }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+            }
+        }
+        // Looked for again after an install sheet closes.
+        .task(id: model.setupTask == nil) {
+            installed = await Task.detached { Set(TerminalCommands.agents.filter(\.isInstalled).map(\.name)) }.value
+        }
     }
 }
 

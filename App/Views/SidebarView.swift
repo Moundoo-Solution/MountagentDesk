@@ -224,13 +224,25 @@ private struct GroupTitle: View {
                         }
                     }
                     Divider()
-                    ForEach(TerminalCommands.agents) { agent in
+                    let terminalAgents = TerminalCommands.agents.map { ($0, $0.isInstalled) }
+                    ForEach(terminalAgents.filter(\.1).map(\.0)) { agent in
                         Button {
                             model.quickLaunch(in: project, agent: project.defaultAgent, branch: "", message: "", command: agent.command)
                         } label: {
-                            Label {
-                                Text(ExecutableLocator.find(agent.executable) == nil ? "Install \(agent.name) and Start a Session" : "New \(agent.name) Session")
-                            } icon: { Image(systemName: agent.symbolName) }
+                            Label { Text("New \(agent.name) Session") } icon: { Image(systemName: agent.symbolName) }
+                        }
+                    }
+                    let missing = terminalAgents.filter { !$0.1 }.map(\.0)
+                    if !missing.isEmpty {
+                        Menu("Install and Start") {
+                            ForEach(missing) { agent in
+                                Button {
+                                    model.quickLaunch(in: project, agent: project.defaultAgent, branch: "", message: "", command: agent.command)
+                                } label: {
+                                    Label { Text("\(agent.name) (\(agent.vendor))") } icon: { Image(systemName: agent.symbolName) }
+                                }
+                                .help("Runs \(agent.install) in the session's terminal, then \(agent.name)")
+                            }
                         }
                     }
                     Button {

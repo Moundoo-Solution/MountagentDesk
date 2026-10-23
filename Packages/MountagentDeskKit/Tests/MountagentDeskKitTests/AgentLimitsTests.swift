@@ -68,6 +68,8 @@ import Testing
         #expect(TerminalCommands.title(for: "  ") == "Shell")
         #expect(TerminalCommands.title(for: "kiro-cli chat") == "Kiro")
         #expect(TerminalCommands.installed { $0 == "aider" || $0 == "claude" ? URL(fileURLWithPath: "/bin/\($0)") : nil } == ["claude", "aider"])
+        #expect(TerminalCommands.title(for: "droid") == "Droid")
+        #expect(TerminalCommands.agents.map(\.name) == ["Kiro", "Amp", "Kimi Code", "Grok Build", "Mistral Vibe", "Droid"])
     }
 
     @Test func runsKiroThroughItsOwnInterface() {
@@ -76,6 +78,8 @@ import Testing
         #expect(TerminalCommands.line(for: "kiro-cli chat", hasRun: true, find: installed) == "kiro-cli chat --resume")
         #expect(TerminalCommands.line(for: "kiro-cli chat", hasRun: false) { _ in nil } == "curl -fsSL https://cli.kiro.dev/install | bash && kiro-cli chat")
         #expect(TerminalCommands.line(for: "kiro-cli chat --agent mine", hasRun: true, find: installed) == "kiro-cli chat --agent mine", "the user's own line runs as typed")
+        #expect(TerminalCommands.line(for: "droid", hasRun: true, find: installed) == "droid --resume --last")
+        #expect(TerminalCommands.line(for: "amp", hasRun: true, find: installed) == "amp", "started bare again")
         var session = ChatSession(projectID: UUID(), agent: .claude)
         session.command = "kiro-cli chat"
         #expect(SessionActivity.line(for: session, running: false)?.text == "Kiro in the terminal")

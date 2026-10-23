@@ -12,6 +12,8 @@
   <img src="https://img.shields.io/badge/Antigravity-4285F4?logo=google&logoColor=white" alt="Antigravity" />
   <img src="https://img.shields.io/badge/Gemini_CLI-1A73E8?logo=googlegemini&logoColor=white" alt="Gemini CLI" />
   <img src="https://img.shields.io/badge/OpenCode-111111" alt="OpenCode" />
+  <br />
+  <sub>In their own terminal interface: Kiro · Amp · Kimi Code · Grok Build · Mistral Vibe · Droid · any CLI</sub>
 </p>
 
 <p align="center"><sub>🍎 Native macOS &nbsp;·&nbsp; 🆓 Free &nbsp;·&nbsp; 📖 MIT</sub></p>

@@ -538,6 +538,11 @@ extension TerminalAgent {
     var symbolName: String {
         switch name {
         case "Kiro": "k.circle.fill"
+        case "Amp": "a.circle.fill"
+        case "Kimi Code": "moon.stars.fill"
+        case "Grok Build": "x.circle.fill"
+        case "Mistral Vibe": "wind"
+        case "Droid": "f.circle.fill"
         default: "terminal"
         }
     }
@@ -545,7 +550,14 @@ extension TerminalAgent {
     var tint: Color {
         switch name {
         case "Kiro": Color(light: 0x7A3EE6, dark: 0xA87BFF)
+        case "Amp": Color(light: 0xD8452F, dark: 0xF06A52)
+        case "Kimi Code": Color(light: 0x1769E0, dark: 0x5C9DFF)
+        case "Grok Build": Theme.textPrimary
+        case "Mistral Vibe": Color(light: 0xE0560B, dark: 0xFF8A3D)
+        case "Droid": Color(light: 0xB4690E, dark: 0xE8A33D)
         default: Theme.textSecondary
         }
     }
+
+    var isInstalled: Bool { ExecutableLocator.find(executable) != nil }
 }
