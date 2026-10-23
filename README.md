@@ -1,48 +1,46 @@
 <p align="center">
-  <img src=".github/assets/icon.png" width="112" alt="Mountagent Desk icon" />
+  <img src=".github/assets/icon.png" width="104" alt="Mountagent Desk icon" />
 </p>
 
 <h1 align="center">Every agent. One desk.</h1>
 
 <p align="center">
-  <b>Claude Code</b> · <b>Codex</b> · <b>Cursor</b> · <b>Copilot</b> · <b>Antigravity</b><br />
-  <sub>A native Mac app for the coding agents you already use. Free and open source.</sub>
+  <img src="https://img.shields.io/badge/Claude_Code-D97757?logo=claude&logoColor=white" alt="Claude Code" />
+  <img src="https://img.shields.io/badge/Codex-111111" alt="Codex" />
+  <img src="https://img.shields.io/badge/Cursor-111111?logo=cursor&logoColor=white" alt="Cursor" />
+  <img src="https://img.shields.io/badge/Copilot-111111?logo=githubcopilot&logoColor=white" alt="GitHub Copilot" />
+  <img src="https://img.shields.io/badge/Antigravity-4285F4?logo=google&logoColor=white" alt="Antigravity" />
 </p>
 
-<p align="center">
-  <a href="#build"><b>Build it →</b></a> &nbsp;·&nbsp; <a href="ARCHITECTURE.md">How it works</a>
-</p>
+<p align="center"><sub>🍎 Native macOS &nbsp;·&nbsp; 🆓 Free &nbsp;·&nbsp; 📖 MIT</sub></p>
 
-![Two agents working side by side in Mountagent Desk](.github/assets/panes.png)
+<p align="center"><a href="#build"><b>Build it →</b></a></p>
 
-### `01 / 04`&nbsp; Run.
-
-**Up to four agents side by side.** Switch agent mid-session; the next one picks up where the last left off.
-
-### `02 / 04`&nbsp; Approve.
-
-**Commands wait for you.** Allow once, always, or deny. Write the next message while the agent works.
-
-### `03 / 04`&nbsp; Undo.
-
-**Every turn is a checkpoint.** Revert a turn in one click. Give a session its own worktree so agents never collide.
-
-![The Git workspace: changes, diff and commit](.github/assets/git.png)
-
-### `04 / 04`&nbsp; Reach.
-
-**Servers, read-only for agents.** SSH terminals for you. Logs and `SELECT`s for agents, nothing that writes.
+![Two agents side by side in Mountagent Desk](.github/assets/hero.png)
 
 <table>
   <tr>
-    <td align="center"><b>⌘K</b><br /><sub>Find any session</sub></td>
-    <td align="center"><b>/</b><br /><sub>Saved prompts</sub></td>
-    <td align="center"><b>$</b><br /><sub>Cost per project</sub></td>
-    <td align="center"><b>⇪</b><br /><sub>Backup and restore</sub></td>
+    <td width="50%" valign="top"><h3>↩️ Undo any turn</h3><img src=".github/assets/revert.png" alt="A turn reverted, with Undo" /></td>
+    <td width="50%" valign="top"><h3>🔎 ⌘K to any session</h3><img src=".github/assets/switcher.png" alt="The session switcher" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><h3>💬 Prompts on <code>/</code></h3><img src=".github/assets/prompts.png" alt="Saved prompts suggested in the composer" /></td>
+    <td valign="top"><h3>🌿 A worktree per session</h3><img src=".github/assets/sessions.png" alt="Sessions, one in its own worktree, and an archive" /></td>
+  </tr>
+  <tr>
+    <td valign="top"><h3>🖥️ Servers, read-only for agents</h3><img src=".github/assets/servers.png" alt="Servers with agent read access" /></td>
+    <td valign="top"><h3>🔀 Git built in</h3><img src=".github/assets/git.png" alt="The Git workspace" /></td>
   </tr>
 </table>
 
-## Build
+<p align="center">
+  ✋ Approve commands &nbsp;·&nbsp; ⏳ Queue messages &nbsp;·&nbsp; 💵 Cost per project<br />
+  🗂️ Archive &amp; export &nbsp;·&nbsp; 💾 Backup &amp; restore &nbsp;·&nbsp; 🎙️ Dictation
+</p>
+
+<a id="build"></a>
+
+## 🛠️ Build
 
 ```sh
 brew install xcodegen
@@ -50,8 +48,4 @@ scripts/make-signing-cert.sh   # once
 scripts/build-app.sh           # installs /Applications/Mountagent Desk.app
 ```
 
-<sub>macOS 14+ and Xcode 16+. Sign in to each agent CLI once in Terminal. Tests: `cd Packages/MountagentDeskKit && swift test`. Coming from AgentDesk? Your data moves over on first launch.</sub>
-
-## License
-
-[MIT](LICENSE). The Copilot mark is from [Primer Octicons](https://github.com/primer/octicons), © GitHub Inc., MIT License.
+<sub>macOS 14+ · Xcode 16+ · sign in to each agent CLI once · <a href="ARCHITECTURE.md">How it works</a> · <a href="LICENSE">MIT</a> · Copilot mark from <a href="https://github.com/primer/octicons">Primer Octicons</a> (MIT)</sub>

@@ -54,7 +54,12 @@ struct SessionSwitcher: View {
         }
         .frame(width: 620, height: 420)
         .background(Theme.background)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            #if DEBUG
+            if let debugQuery = ProcessInfo.processInfo.environment["MOUNTAGENT_SHOW_SWITCHER"] { query = debugQuery }
+            #endif
+        }
         .task(id: query) {
             // Searched off the main thread: long sessions hold a lot of text.
             let sessions = Array(model.sessions.values)
