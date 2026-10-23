@@ -165,6 +165,16 @@ private struct GroupTitle: View {
                             .foregroundStyle(Theme.warning)
                             .help("Missing: \(project.missingPaths.joined(separator: ", "))")
                     }
+                    let waiting = model.sessions(of: project.id).filter { model.hasPendingPermission($0.id) }.count
+                    if waiting > 0 {
+                        Label("\(waiting)", systemImage: "hand.raised.fill")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(Theme.background)
+                            .padding(.horizontal, 5)
+                            .frame(height: 15)
+                            .background(Theme.warning, in: Capsule())
+                            .help("\(waiting) session\(waiting == 1 ? " needs" : "s need") you")
+                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 7, weight: .bold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
@@ -262,18 +272,36 @@ private struct SessionCell: View {
                     .foregroundStyle(isSelected || isActive ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                     .mask(fadeMask)
-                if let branch = session.branch {
-                    let moved = session.worktree == nil && currentBranch != nil && currentBranch != branch
-                    HStack(spacing: 3) {
-                        Image(systemName: moved ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
-                            .font(.system(size: 8, weight: .semibold))
-                        Text(branch)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                let activity = SessionActivity.line(for: session, running: isRunning)
+                if session.branch != nil || activity != nil {
+                    HStack(spacing: 4) {
+                        if let branch = session.branch {
+                            let moved = session.worktree == nil && currentBranch != nil && currentBranch != branch
+                            HStack(spacing: 3) {
+                                Image(systemName: moved ? "exclamationmark.triangle.fill" : "arrow.triangle.branch")
+                                    .font(.system(size: 8, weight: .semibold))
+                                Text(branch)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(moved ? Theme.warning : Theme.textTertiary)
+                            .frame(maxWidth: activity == nil ? nil : 130, alignment: .leading)
+                            .fixedSize(horizontal: activity == nil || branch.count < 14, vertical: false)
+                            .help(moved ? "Last worked on \(branch); the repository is now on \(currentBranch ?? "")." : "Branch this session last worked on")
+                        }
+                        if let activity {
+                            if session.branch != nil {
+                                Text("·").foregroundStyle(Theme.textTertiary)
+                            }
+                            // What the agent is doing, waits for, or how the last turn ended.
+                            Text(activity.text)
+                                .foregroundStyle(color(of: activity.state))
+                                .lineLimit(1)
+                                .help(activity.text)
+                        }
                     }
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(moved ? Theme.warning : Theme.textTertiary)
-                    .help(moved ? "Last worked on \(branch); the repository is now on \(currentBranch ?? "")." : "Branch this session last worked on")
+                    .font(.system(size: 10.5))
                 }
             }
             Spacer(minLength: 0)
@@ -327,6 +355,15 @@ private struct SessionCell: View {
             }
             Divider()
             Button("Delete Session", role: .destructive, action: delete)
+        }
+    }
+
+    private func color(of state: SessionActivity.State) -> Color {
+        switch state {
+        case .working: session.agent.tint
+        case .waiting: Theme.warning
+        case .failed: Theme.danger
+        case .finished: Theme.textTertiary
         }
     }
 

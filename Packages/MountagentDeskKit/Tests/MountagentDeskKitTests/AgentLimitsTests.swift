@@ -42,3 +42,21 @@ import Testing
         #expect(paid.plan == "Pro" && paid.usage.limits.map(\.percent) == [40])
     }
 }
+
+@Suite struct SessionActivityTests {
+    @Test func saysWhatTheAgentIsDoing() {
+        var session = ChatSession(projectID: UUID(), agent: .claude)
+        #expect(SessionActivity.line(for: session, running: false) == nil)
+        session.items = [ChatItem(kind: .user, text: "go")]
+        #expect(SessionActivity.line(for: session, running: true)?.text == "Starting…")
+        session.items.append(ChatItem(kind: .tool, agent: .claude, text: "python3 -m unittest", toolName: "Bash", toolStatus: .running))
+        #expect(SessionActivity.line(for: session, running: true) == .init(state: .working, text: "Running python3 -m unittest"))
+        session.items.append(ChatItem(kind: .permission, agent: .claude, text: "rm -rf build", toolName: "Bash", permissionState: .pending))
+        #expect(SessionActivity.line(for: session, running: true) == .init(state: .waiting, text: "Needs you: run rm -rf build"))
+        session.items[2].permissionState = .allowed
+        session.items.append(ChatItem(kind: .assistant, agent: .claude, text: "## Done\n\n**All 8 tests** pass.\nMountagent-Title: x"))
+        #expect(SessionActivity.line(for: session, running: false) == .init(state: .finished, text: "Done"))
+        session.items.append(ChatItem(kind: .notice, text: "Claude stopped: not signed in", isError: true))
+        #expect(SessionActivity.line(for: session, running: false)?.state == .failed)
+    }
+}
